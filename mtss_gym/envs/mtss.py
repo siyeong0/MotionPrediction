@@ -19,8 +19,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.max_episode_length_s = self.cfg.env.episode_length_s
         self.dt = cfg.sim.dt
         self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
+        self.num_update = int(cfg.sim.control_dt / self.dt)
         # parse simulation params
         sim_params = gymapi.SimParams()
+        sim_params.use_gpu_pipeline = cfg.sim.use_gpu
         sim_params.dt = cfg.sim.dt
         sim_params.substeps = cfg.sim.substeps
         sim_params.gravity = gymapi.Vec3(cfg.sim.gravity[0], cfg.sim.gravity[1], cfg.sim.gravity[2])
@@ -51,9 +53,9 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
 
         self.pre_physics_step()
-        # TODO: reflect control frequency
-        self.gym.simulate(self.sim)
-        self.render()
+        for _ in range(self.num_update):
+            self.gym.simulate(self.sim)
+            self.render()
         self.post_physics_step()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
