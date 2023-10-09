@@ -1,12 +1,10 @@
-from time import time
-from warnings import WarningMessage
 import numpy as np
 import os
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-
-import torch
+from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, get_axis_params, calc_heading_quat_inv, \
+     exp_map_to_quat, quat_to_tan_norm, my_quat_rotate, calc_heading_quat_inv
 
 from mtss_gym.envs.base_task import BaseTask
 from mtss_gym.envs.mtss_cfg import MtssCfg
@@ -77,8 +75,6 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
-        self.base_quat[:] = self.root_states[:, 3:7]
-
         # compute observations, rewards, resets, ...
         self.check_termination()
         self.compute_reward()
@@ -115,11 +111,18 @@ class MotionTrackingFromSparseSensor(BaseTask):
         # simulated character observation 
         dof_pos = torch.flatten(self.dof_pos, 1) * self.obs_scales.dof_pos
         dof_vel = torch.flatten(self.dof_vel, 1) * self.obs_scales.dof_vel
-        body_pos = torch.flatten(self.body_pos, 1) * self.obs_scales.body_pos
-        body_vel = torch.flatten(self.body_vel, 1) * self.obs_scales.body_vel
-        body_quat = torch.flatten(self.body_quat, 1) * self.obs_scales.body_quat
-        body_ang_vel = torch.flatten(self.body_ang_vel, 1) * self.obs_scales.body_ang_vel
+        body_pos = self.to_avatar_centric_coord_p(self.body_pos) * self.obs_scales.body_pos
+        body_vel = self.to_avatar_centric_coord_v(self.body_vel) * self.obs_scales.body_vel
+        body_quat = self.to_avatar_centric_coord_r(self.body_quat) * self.obs_scales.body_quat
+        body_ang_vel = self.to_avatar_centric_coord_a(self.body_ang_vel) * self.obs_scales.body_ang_vel
+            
+        idx = 0
+        print((body_ang_vel[0,idx*3:(idx+1)*3].cpu().numpy() * 100).astype(int))
+        idx = 1
+        print((body_ang_vel[0,idx*3:(idx+1)*3].cpu().numpy() * 100).astype(int))
+        
         contact_force = torch.flatten(self.contact_force, 1) * self.obs_scales.contact_force
+        
         obs_sim = torch.cat((dof_pos,dof_vel,body_pos,body_vel,body_quat,body_ang_vel,contact_force), dim=-1)
         # sensor position observation
         self.sensor_obs_hist[..., 1:self.num_stack-1] = self.sensor_obs_hist[..., 0:self.num_stack-2]
@@ -172,7 +175,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
-        self.base_quat = self.root_states[:, 3:7]
+        self.root_pos = self.root_states[:, 0:3]
+        self.root_quat = self.root_states[:, 3:7]
+        self.root_vel = self.root_states[:, 7:10]
+        self.root_ang_vel = self.root_states[:, 10:13]
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
@@ -188,8 +194,6 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.init_root_state = torch.clone(self.root_states)
         self.common_step_counter = 0
         self.extras = {}
-        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
-        self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         
         self.num_stack = 6
         self.sensor_obs_hist = torch.zeros(self.num_envs, self.num_stack, (3+4+3+3), device=self.device)
@@ -268,5 +272,42 @@ class MotionTrackingFromSparseSensor(BaseTask):
     
     #------------ helper functions----------------
     def sample_action(self):
-        return (torch.rand(self.num_envs, self.num_actions) - 0.5) * 5
+        action = (torch.rand(self.num_envs, self.num_actions) - 0.5) * 3.0
+        return action
     
+    def to_avatar_centric_coord_p(self, pos):
+        base_pos = torch.clone(self.root_pos)
+        base_pos[:,2] = 0
+        base_pos_expand = base_pos.unsqueeze(-2)
+        base_pos_expand = base_pos_expand.repeat((1, pos.shape[1], 1))  # TODO: repeat을 하지 않아도 결과가 같음.
+        relative_pos = pos - base_pos_expand
+        
+        return self.to_avatar_centric_coord_v(relative_pos)
+    
+    def to_avatar_centric_coord_v(self, vec):
+        heading_rot = calc_heading_quat_inv(self.root_quat)
+        heading_rot_expand = heading_rot.unsqueeze(-2)
+        heading_rot_expand = heading_rot_expand.repeat((1, vec.shape[1], 1))
+        
+        flat_vec = vec.view(vec.shape[0] * vec.shape[1], vec.shape[2])
+        flat_heading_rot = heading_rot_expand.view(heading_rot_expand.shape[0] * heading_rot_expand.shape[1], heading_rot_expand.shape[2])
+        local_vec = my_quat_rotate(flat_heading_rot, flat_vec)
+        flat_local_vec = local_vec.view(vec.shape[0], vec.shape[1] * vec.shape[2])
+        
+        return flat_local_vec
+    
+    def to_avatar_centric_coord_r(self, quat):
+        inv_root_quat = -self.root_quat
+        inv_root_quat[:,-1] *= -1. 
+        inv_root_quat_expand = inv_root_quat.unsqueeze(-2)
+        inv_root_quat_expand = inv_root_quat_expand.repeat((1, quat.shape[1], 1))
+        
+        flat_quat = quat.view(quat.shape[0] * quat.shape[1], quat.shape[2])
+        flat_inv_root_quat = inv_root_quat_expand.view(inv_root_quat_expand.shape[0] * inv_root_quat_expand.shape[1], inv_root_quat_expand.shape[2])
+        local_quat = quat_mul(flat_inv_root_quat, flat_quat)
+        flat_local_quat = local_quat.view(quat.shape[0], quat.shape[1] * quat.shape[2])
+        
+        return flat_local_quat
+    
+    def to_avatar_centric_coord_a(self, vec):
+        return (torch.clone(vec)).view(vec.shape[0], vec.shape[1] * vec.shape[2])
