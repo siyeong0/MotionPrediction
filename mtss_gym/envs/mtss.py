@@ -111,10 +111,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
         # simulated character observation 
         dof_pos = torch.flatten(self.dof_pos, 1) * self.obs_scales.dof_pos
         dof_vel = torch.flatten(self.dof_vel, 1) * self.obs_scales.dof_vel
-        body_pos = self.to_avatar_centric_coord_p(self.body_pos) * self.obs_scales.body_pos
-        body_vel = self.to_avatar_centric_coord_v(self.body_vel) * self.obs_scales.body_vel
-        body_quat = self.to_avatar_centric_coord_r(self.body_quat) * self.obs_scales.body_quat
-        body_ang_vel = self.to_avatar_centric_coord_v(self.body_ang_vel) * self.obs_scales.body_ang_vel
+        body_pos = self._to_avatar_centric_coord_p(self.body_pos) * self.obs_scales.body_pos
+        body_vel = self._to_avatar_centric_coord_v(self.body_vel) * self.obs_scales.body_vel
+        body_quat = self._to_avatar_centric_coord_r(self.body_quat) * self.obs_scales.body_quat
+        body_ang_vel = self._to_avatar_centric_coord_v(self.body_ang_vel) * self.obs_scales.body_ang_vel
         contact_force = torch.flatten(self.contact_force, 1) * self.obs_scales.contact_force
         
         obs_sim = torch.cat((dof_pos,dof_vel,body_pos,body_vel,body_quat,body_ang_vel,contact_force), dim=-1)
@@ -269,16 +269,16 @@ class MotionTrackingFromSparseSensor(BaseTask):
         action = (torch.rand(self.num_envs, self.num_actions) - 0.5) * 3.0
         return action
     
-    def to_avatar_centric_coord_p(self, pos):
+    def _to_avatar_centric_coord_p(self, pos):
         base_pos = torch.clone(self.root_pos)
         base_pos[:,2] = 0
         base_pos_expand = base_pos.unsqueeze(-2)
         base_pos_expand = base_pos_expand.repeat((1, pos.shape[1], 1))  # TODO: repeat을 하지 않아도 결과가 같음.
         relative_pos = pos - base_pos_expand
         
-        return self.to_avatar_centric_coord_v(relative_pos)
+        return self._to_avatar_centric_coord_v(relative_pos)
     
-    def to_avatar_centric_coord_v(self, vec):
+    def _to_avatar_centric_coord_v(self, vec):
         heading_rot = calc_heading_quat_inv(self.root_quat)
         heading_rot_expand = heading_rot.unsqueeze(-2)
         heading_rot_expand = heading_rot_expand.repeat((1, vec.shape[1], 1))
@@ -290,7 +290,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         return flat_local_vec
     
-    def to_avatar_centric_coord_r(self, quat):
+    def _to_avatar_centric_coord_r(self, quat):
         inv_root_quat = -self.root_quat
         inv_root_quat[:,-1] *= -1. 
         inv_root_quat_expand = inv_root_quat.unsqueeze(-2)
