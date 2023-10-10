@@ -114,13 +114,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         body_pos = self.to_avatar_centric_coord_p(self.body_pos) * self.obs_scales.body_pos
         body_vel = self.to_avatar_centric_coord_v(self.body_vel) * self.obs_scales.body_vel
         body_quat = self.to_avatar_centric_coord_r(self.body_quat) * self.obs_scales.body_quat
-        body_ang_vel = self.to_avatar_centric_coord_a(self.body_ang_vel) * self.obs_scales.body_ang_vel
-            
-        idx = 0
-        print((body_ang_vel[0,idx*3:(idx+1)*3].cpu().numpy() * 100).astype(int))
-        idx = 1
-        print((body_ang_vel[0,idx*3:(idx+1)*3].cpu().numpy() * 100).astype(int))
-        
+        body_ang_vel = self.to_avatar_centric_coord_v(self.body_ang_vel) * self.obs_scales.body_ang_vel
         contact_force = torch.flatten(self.contact_force, 1) * self.obs_scales.contact_force
         
         obs_sim = torch.cat((dof_pos,dof_vel,body_pos,body_vel,body_quat,body_ang_vel,contact_force), dim=-1)
@@ -308,6 +302,3 @@ class MotionTrackingFromSparseSensor(BaseTask):
         flat_local_quat = local_quat.view(quat.shape[0], quat.shape[1] * quat.shape[2])
         
         return flat_local_quat
-    
-    def to_avatar_centric_coord_a(self, vec):
-        return (torch.clone(vec)).view(vec.shape[0], vec.shape[1] * vec.shape[2])
