@@ -62,5 +62,5 @@ if __name__ == "__main__":
         fps=120
     )
     motion.to_file(dst_file)
-    motion.
+
     # plot_skeleton_motion_interactive(motion)
