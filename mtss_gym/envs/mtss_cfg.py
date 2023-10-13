@@ -2,14 +2,14 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 1
+        num_envs = 8
         num_observations = 235
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
-        min_episode_length_s = 2 # episode length in seconds
-        max_episode_length_s = 3
+        min_episode_length_s = 0 # episode length in seconds
+        max_episode_length_s = 10
 
     class asset:
         file = "resources/humanoid.xml"
@@ -35,8 +35,16 @@ class MtssCfg(BaseConfig):
         
     class motion:
         dir = "resources/motions"
-        files = ["amp_humanoid_walk"]
-
+        # files = ["amp_humanoid_walk", 
+        #          "amp_humanoid_dance", 
+        #          "amp_humanoid_run", 
+        #          "amp_humanoid_cartwheel", 
+        #          "amp_humanoid_hop",
+        #          "amp_humanoid_backflip"]
+        [f"02_{str(i).zfill(2)}" for i in range(5,6)]
+        files = [f"01_{str(i).zfill(2)}"for i in range(1,15)] + \
+            [f"02_{str(i).zfill(2)}"for i in range(1,10)] + \
+            [f"03_{str(i).zfill(2)}"for i in range(1,5)]
     class reward:
         functions = ["imitation, contact, regularization"]
         class coef:
