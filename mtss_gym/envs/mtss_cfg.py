@@ -1,9 +1,10 @@
+import os
 from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 8
-        num_observations = 235
+        num_envs = 64
+        num_observations = 309
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
         env_spacing = 3.  # not used with heightfields/trimeshes 
@@ -34,17 +35,8 @@ class MtssCfg(BaseConfig):
         sensor_body_name = ["head", "left_hand", "right_hand"]
         
     class motion:
-        dir = "resources/motions"
-        # files = ["amp_humanoid_walk", 
-        #          "amp_humanoid_dance", 
-        #          "amp_humanoid_run", 
-        #          "amp_humanoid_cartwheel", 
-        #          "amp_humanoid_hop",
-        #          "amp_humanoid_backflip"]
-        [f"02_{str(i).zfill(2)}" for i in range(5,6)]
-        files = [f"01_{str(i).zfill(2)}"for i in range(1,15)] + \
-            [f"02_{str(i).zfill(2)}"for i in range(1,10)] + \
-            [f"03_{str(i).zfill(2)}"for i in range(1,5)]
+        dir = "resources/test"
+        files = os.listdir(dir)
     class reward:
         functions = ["imitation, contact, regularization"]
         class coef:
@@ -80,8 +72,8 @@ class MtssCfg(BaseConfig):
 
     class sim:
         use_gpu = True
-        dt = 0.0166
-        control_dt = 0.0166  # timestep to update control values (sec)
+        dt = 0.0333
+        control_dt = 0.0333 # timestep to update control values (sec)
         substeps = 1
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z

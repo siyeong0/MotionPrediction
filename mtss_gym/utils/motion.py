@@ -18,6 +18,11 @@ class Motion:
                                    key_body_ids=np.array([x for x in range(num_bodies)]),
                                    device=device)
             self.motion_libs.append(motion_lib) 
+        print("===================================================")
+        print("Loaded {:d} motion files with a total length of {:.3f}" \
+            .format(len(self.motion_libs), sum([motion.get_motion_length(0) for motion in self.motion_libs]))) # assert one motion_lib contain only one motion data
+        print("===================================================")
+            
         
         self.motion_idxs = np.full((num_envs), -1)
         self.motion_ids = np.full((num_envs), -1)
