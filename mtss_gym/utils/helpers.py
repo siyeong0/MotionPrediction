@@ -1,0 +1,24 @@
+import os
+from datetime import datetime
+
+def class_to_dict(obj) -> dict:
+    if not  hasattr(obj,"__dict__"):
+        return obj
+    result = {}
+    for key in dir(obj):
+        if key.startswith("_"):
+            continue
+        element = []
+        val = getattr(obj, key)
+        if isinstance(val, list):
+            for item in val:
+                element.append(class_to_dict(item))
+        else:
+            element = class_to_dict(val)
+        result[key] = element
+    return result
+
+def get_log_dir(path, name):
+    if not os.path.isdir(path):
+        os.mkdir(path)
+    return os.path.join(path, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + name)
