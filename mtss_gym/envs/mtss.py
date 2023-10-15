@@ -265,6 +265,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
         plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
+        plane_params.dynamic_friction = 1.0
+        plane_params.static_friction = 1.0
         self.gym.add_ground(self.sim, plane_params)
 
     def _create_envs(self):

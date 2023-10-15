@@ -3,7 +3,7 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 64
+        num_envs = 256
         num_observations = 374
         num_stack = 6
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
@@ -17,7 +17,7 @@ class MtssCfg(BaseConfig):
         file = "resources/humanoid.xml"
         name = "humanoid"  # actor name
         disable_gravity = False
-        default_dof_drive_mode = 0 # see GymDofDriveModeFlags (0 is none, 1 is pos tgt, 2 is vel tgt, 3 effort)
+        default_dof_drive_mode = 3 # see GymDofDriveModeFlags (0 is none, 1 is pos tgt, 2 is vel tgt, 3 effort)
         collapse_fixed_joints = True # merge bodies connected by fixed joints. Specific fixed joints can be kept by adding " <... dont_collapse="true">
         fix_base_link = False # fixe the base of the robot
         replace_cylinder_with_capsule = True # replace collision cylinders with capsules, leads to faster/more stable simulation
@@ -46,17 +46,17 @@ class MtssCfg(BaseConfig):
             w_c = 1.0
             w_r = 0.2
             class imitation:
-                w_q = 1.0
-                w_qv = 0.2
-                w_p = 1.0
-                w_pv = 0.2
+                w_q = 0.4
+                w_qv = 0.1
+                w_p = 0.2
+                w_pv = 0.1
                 w_r = 0.2
                 
-                k_q = 1.0
-                k_qv = 1.0
-                k_p = 1.0
-                k_pv = 1.0
-                k_r = 1.0
+                k_q = 40.0
+                k_qv = 0.3
+                k_p = 6.0
+                k_pv = 2.0
+                k_r = 0.01
             class contact:
                 w_c = 1.0
                 q_c = 1.0
@@ -69,7 +69,7 @@ class MtssCfg(BaseConfig):
             
     class normalization:
         clip_observations = 100.
-        clip_actions = 100.
+        clip_actions = 1.
 
     # viewer camera:
     class viewer:
@@ -79,9 +79,9 @@ class MtssCfg(BaseConfig):
 
     class sim:
         use_gpu = True
-        dt = 0.0333
-        control_dt = 0.1 # timestep to update control values (sec)
-        substeps = 1
+        dt = 1/36
+        control_dt = 1/36 # timestep to update control values (sec)
+        substeps = 2
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z
         
@@ -101,7 +101,7 @@ class MtssPPOCfg(BaseConfig):
     seed = 1
     runner_class_name = 'OnPolicyRunner'
     class policy:
-        init_noise_std = 1.0
+        init_noise_std = 0.03
         actor_hidden_dims = [300, 200, 100]
         critic_hidden_dims = [400, 400, 300, 200]
         activation = 'tanh' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
@@ -128,7 +128,7 @@ class MtssPPOCfg(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 24 # per iteration
+        num_steps_per_env = 15 # per iteration
         max_iterations = 1500 # number of policy updates
 
         # logging
