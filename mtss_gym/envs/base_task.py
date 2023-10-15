@@ -5,8 +5,10 @@ from isaacgym import gymutil
 import numpy as np
 import torch
 
+from rsl_rl.env import VecEnv
+
 # Base class for RL tasks
-class BaseTask():
+class BaseTask(VecEnv):
 
     def __init__(self, cfg, sim_params, physics_engine, sim_device, headless):
         self.gym = gymapi.acquire_gym()

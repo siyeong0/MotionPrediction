@@ -33,7 +33,8 @@ class Motion:
         for env_id in env_ids:
             self.motion_idxs[env_id] = np.random.randint(len(self.motion_libs))  
             self.motion_ids[env_id] = self.sample_motion(env_id)
-            self.curr_time[env_id] = self.sample_time(env_id)
+            #self.curr_time[env_id] = self.sample_time(env_id)
+            self.curr_time[env_id] = 0.0
             
     def get_motion_lib(self, env_id) -> MotionLib:
         return self.motion_libs[self.motion_idxs[env_id]]

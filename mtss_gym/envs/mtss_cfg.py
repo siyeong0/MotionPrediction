@@ -4,13 +4,14 @@ from .base_cfg import BaseConfig
 class MtssCfg(BaseConfig):
     class env:
         num_envs = 64
-        num_observations = 309
+        num_observations = 374
+        num_stack = 6
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
         min_episode_length_s = 0 # episode length in seconds
-        max_episode_length_s = 10
+        max_episode_length_s = 180
 
     class asset:
         file = "resources/humanoid.xml"
@@ -38,7 +39,7 @@ class MtssCfg(BaseConfig):
         dir = "resources/test"
         files = os.listdir(dir)
     class reward:
-        functions = ["imitation, contact, regularization"]
+        functions = ["imitation", "contact", "regularization"]
         class coef:
             class imitation:
                 q = 1.0
@@ -73,7 +74,7 @@ class MtssCfg(BaseConfig):
     class sim:
         use_gpu = True
         dt = 0.0333
-        control_dt = 0.0333 # timestep to update control values (sec)
+        control_dt = 0.5 # timestep to update control values (sec)
         substeps = 1
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z

@@ -12,9 +12,3 @@ if __name__ == "__main__":
 
     ppo_runner = OnPolicyRunner(env, class_to_dict(MtssPPOCfg), get_log_dir("logs", "mtss"), device="cuda:0")
     ppo_runner.learn(num_learning_iterations=MtssPPOCfg.runner.max_iterations, init_at_random_ep_len=True)
-    
-    obs = env.get_observations()
-    
-    while True:
-        actions = env.sample_action()
-        obs, _, rews, dones, infos = env.step(actions)  
