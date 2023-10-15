@@ -134,7 +134,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
 
     def check_termination(self):
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
-        self.reset_buf = torch.logical_or(self.time_out_buf, self.motion_end_buf)
+        self.fall_down_buf = torch.norm(self.root_pos - self.motion_root_state_buf[:, 0:3], dim=1) > 1.0
+        self.reset_buf = torch.logical_or(torch.logical_or(self.time_out_buf, self.motion_end_buf), self.fall_down_buf)
 
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
@@ -248,6 +249,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.motion_link_state_buf = torch.zeros(self.num_envs, self.num_bodies, 10, device=self.device, dtype=torch.float32)
         
         self.motion_end_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.fall_down_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.sensor_obs_hist = torch.zeros(self.num_envs, self.num_stack, (3+4+3+3), device=self.device)
         
     def _load_motions(self):
