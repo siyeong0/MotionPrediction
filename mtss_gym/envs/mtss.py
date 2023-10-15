@@ -14,7 +14,6 @@ class MotionTrackingFromSparseSensor(BaseTask):
     def __init__(self, cfg: MtssCfg, physics_engine, sim_device, headless):
         # parse config
         self.cfg = cfg
-        self.obs_scales = self.cfg.normalization.obs_scales
         self.num_stack = self.cfg.env.num_stack
         self.min_episode_length_s = self.cfg.env.min_episode_length_s
         self.max_episode_length_s = self.cfg.env.max_episode_length_s
@@ -58,15 +57,15 @@ class MotionTrackingFromSparseSensor(BaseTask):
         while True:
             # play randomly selected motion
             env_ids = self._every_env_ids()
-            state, done = self.motion.get_motion_state(env_ids)
+            state, done = self.motion.step_motion_state(env_ids)
             self.motion_end_buf[env_ids] = to_torch(done, dtype=torch.bool, device=self.device)
-            root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = state
+            root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot = state
             self._set_env_state(env_ids=env_ids, 
                                 root_pos=root_pos, 
-                                root_rot=root_rot, 
-                                dof_pos=dof_pos, 
-                                root_vel=root_vel, 
-                                root_ang_vel=root_ang_vel, 
+                                root_rot=root_rot,
+                                root_vel=root_vel,
+                                root_ang_vel=root_ang_vel,  
+                                dof_pos=dof_pos,  
                                 dof_vel=dof_vel)
             # simulate
             for _ in range(self.num_update):
@@ -90,6 +89,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+            
+        self.prev_actions = self.actions
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def pre_physics_step(self):
@@ -108,12 +109,28 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
+        # motion step
+        env_ids = self._every_env_ids()
+        state, done = self.motion.step_motion_state(env_ids)
+        root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot = state
+        self.motion_root_state_buf[env_ids, 0:3] = root_pos
+        self.motion_root_state_buf[env_ids, 3:7] = root_rot
+        self.motion_root_state_buf[env_ids, 7:10] = root_vel
+        self.motion_root_state_buf[env_ids, 10:13] = root_ang_vel
+        self.motion_dof_state_buf[env_ids, :, 0] = dof_pos
+        self.motion_dof_state_buf[env_ids, :, 1] = dof_vel
+        self.motion_link_state_buf[env_ids, :, 0:3] = key_pos
+        self.motion_link_state_buf[env_ids, :, 3:6] = key_vel
+        self.motion_link_state_buf[env_ids, :, 6:10] = key_rot
+        
+        self.motion_end_buf[env_ids] = to_torch(done, dtype=torch.bool, device=self.device)
+
         # compute observations, rewards, resets, ...
-        self.check_termination()
+        self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
         self.compute_reward()
+        self.check_termination()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
-        self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
     def check_termination(self):
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
@@ -131,30 +148,34 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.reset_buf[env_ids] = 1
     
     def compute_reward(self):
+        coef = self.cfg.reward.coef
         self.rew_buf[:] = 0.
         if "imitation" in self.cfg.reward.functions:
-            self.rew_buf += self._reward_imitation()
+            self.rew_buf += coef.w_i * self._reward_imitation()
         if "contact" in self.cfg.reward.functions:
-            self.rew_buf += self._reward_contact()
+            self.rew_buf += coef.w_c * self._reward_contact()
         if "regularization" in self.cfg.reward.functions:
-            self.rew_buf += self._reward_regularization()
+            self.rew_buf += coef.w_r * self._reward_regularization()
     
     def compute_observations(self):
         # simulated character observation 
-        dof_pos = torch.flatten(self.dof_pos, 1) * self.obs_scales.dof_pos
-        dof_vel = torch.flatten(self.dof_vel, 1) * self.obs_scales.dof_vel
-        body_pos = self._to_avatar_centric_coord_p(self.body_pos) * self.obs_scales.body_pos
-        body_vel = self._to_avatar_centric_coord_v(self.body_vel) * self.obs_scales.body_vel
-        body_quat = self._to_avatar_centric_coord_r(self.body_quat) * self.obs_scales.body_quat
-        body_ang_vel = self._to_avatar_centric_coord_v(self.body_ang_vel) * self.obs_scales.body_ang_vel
-        contact_force = torch.flatten(self.contact_force, 1) * self.obs_scales.contact_force
+        self.obs_dof_pos = torch.flatten(self.dof_pos, 1)
+        self.obs_dof_vel = torch.flatten(self.dof_vel, 1)
+        self.obs_body_pos = self._to_avatar_centric_coord_p(self.glob_body_pos, self.root_states)
+        self.obs_body_vel = self._to_avatar_centric_coord_v(self.glob_body_vel, self.root_states)
+        self.obs_body_quat = self._to_avatar_centric_coord_r(self.glob_body_quat, self.root_states)
+        self.obs_body_ang_vel = self._to_avatar_centric_coord_v(self.glob_body_ang_vel, self.root_states)
+        self.obs_contact_force = torch.flatten(self.contact_force, 1)
         
-        obs_sim = torch.cat((dof_pos,dof_vel,body_pos,body_vel,body_quat,body_ang_vel,contact_force), dim=-1)
+        obs_sim = torch.cat((self.obs_dof_pos,self.obs_dof_vel,
+                             self.obs_body_pos,self.obs_body_vel,
+                             self.obs_body_quat,self.obs_body_ang_vel,
+                             self.obs_contact_force), dim=-1)
         # sensor position observation
+        sensor_pos = self._to_avatar_centric_coord_p(self.motion_link_state_buf[:, self.sensor_indices, 0:3], self.motion_root_state_buf)
+        headset_quat = self._to_avatar_centric_coord_r(self.motion_link_state_buf[:, self.sensor_indices[0]:self.sensor_indices[0]+1, 6:10], self.motion_root_state_buf)
         if self.num_stack > 1:
             self.sensor_obs_hist[:, 1:self.num_stack-1] = self.sensor_obs_hist[:, 0:self.num_stack-2]
-        sensor_pos = torch.flatten(self.body_pos[:,self.sensor_indices,:], 1) * self.obs_scales.body_pos
-        headset_quat = torch.flatten(self.body_quat[:,self.sensor_indices[0],:], 1) * self.obs_scales.body_quat
         self.sensor_obs_hist[:, 0,:] = torch.cat((sensor_pos, headset_quat),dim=1)
         obs_user = torch.flatten(self.sensor_obs_hist, 1)
         
@@ -174,15 +195,14 @@ class MotionTrackingFromSparseSensor(BaseTask):
     def _reset_actors(self, env_ids):
         self.motion.reset(env_ids)
 
-        state, done = self.motion.get_motion_state(env_ids)
-        self.motion_end_buf[env_ids] = to_torch(done, dtype=torch.bool, device=self.device)
-        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = state
+        state = self.motion.get_motion_state(env_ids)
+        root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot = state
         self._set_env_state(env_ids=env_ids, 
                             root_pos=root_pos, 
-                            root_rot=root_rot, 
-                            dof_pos=dof_pos, 
-                            root_vel=root_vel, 
-                            root_ang_vel=root_ang_vel, 
+                            root_rot=root_rot,
+                            root_vel=root_vel,
+                            root_ang_vel=root_ang_vel,  
+                            dof_pos=dof_pos,  
                             dof_vel=dof_vel)
         self.sensor_obs_hist[env_ids] = 0
 
@@ -209,10 +229,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dofs, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dofs, 2)[..., 1]
         self.body_state = gymtorch.wrap_tensor(body_state_tensor)
-        self.body_pos = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,0:3]
-        self.body_quat = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,3:7]
-        self.body_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,7:10]
-        self.body_ang_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,10:13]
+        self.glob_body_pos = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,0:3]
+        self.glob_body_quat = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,3:7]
+        self.glob_body_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,7:10]
+        self.glob_body_ang_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,10:13]
         self.contact_force = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
         self.motor_efforts = to_torch(self.motor_efforts, device=self.device)
         
@@ -220,8 +240,15 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.common_step_counter = 0
         self.extras = {}
         
-        self.sensor_obs_hist = torch.zeros(self.num_envs, self.num_stack, (3+4+3+3), device=self.device)
+        self.actions = torch.zeros(self.num_envs, self.num_actions, device=self.device, dtype=torch.float32)
+        self.prev_actions = torch.zeros_like(self.actions)
+        
+        self.motion_root_state_buf = torch.zeros(self.num_envs, 13, device=self.device, dtype=torch.float32)
+        self.motion_dof_state_buf = torch.zeros(self.num_envs, self.num_dofs, 2, device=self.device, dtype=torch.float32)
+        self.motion_link_state_buf = torch.zeros(self.num_envs, self.num_bodies, 10, device=self.device, dtype=torch.float32)
+        
         self.motion_end_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.sensor_obs_hist = torch.zeros(self.num_envs, self.num_stack, (3+4+3+3), device=self.device)
         
     def _load_motions(self):
         self.motion_libs = []
@@ -295,12 +322,14 @@ class MotionTrackingFromSparseSensor(BaseTask):
         for i in range(len(sensor_names)):
             self.sensor_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], sensor_names[i])
             
-    def _set_env_state(self, env_ids, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel):
+    def _set_env_state(self, env_ids, root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel):
+        self.root_states[env_ids, :] = 0
         self.root_states[env_ids, 0:3] = root_pos
         self.root_states[env_ids, 3:7] = root_rot
-        self.root_states[env_ids, 7:10] = root_vel
-        self.root_states[env_ids, 10:13] = root_ang_vel
+        #self.root_states[env_ids, 7:10] = root_vel
+        #self.root_states[env_ids, 10:13] = root_ang_vel
         
+        self.dof_state[env_ids, :] = 0
         self.dof_pos[env_ids] = dof_pos
         self.dof_vel[env_ids] = dof_vel
         
@@ -312,13 +341,35 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
     #------------ reward functions----------------
     def _reward_imitation(self):
-        return torch.ones(self.num_envs, device=self.device)
+        coef = self.cfg.reward.coef.imitation
+        ref_dof_pos = torch.flatten(self.motion_dof_state_buf[:,:,0], 1)
+        ref_dof_vel = torch.flatten(self.motion_dof_state_buf[:,:,1], 1)
+        ref_body_pos = self._to_avatar_centric_coord_p(self.motion_link_state_buf[:,:,0:3], self.motion_root_state_buf)
+        ref_body_vel = self._to_avatar_centric_coord_v(self.motion_link_state_buf[:,:,3:6], self.motion_root_state_buf)
+        ref_body_rot = self._to_avatar_centric_coord_r(self.motion_link_state_buf[:,:,6:10], self.motion_root_state_buf)
+        
+        r_dof_pos_im = coef.w_p * _exp_neg_square(coef.k_p, (self.obs_dof_pos-ref_dof_pos))
+        r_dof_vel_im = coef.w_pv * _exp_neg_square(coef.k_pv, (self.obs_dof_vel-ref_dof_vel))
+        r_link_pos_im = coef.w_q * _exp_neg_square(coef.k_q, (self.obs_body_pos-ref_body_pos))
+        r_link_vel_im = coef.w_qv * _exp_neg_square(coef.k_qv, (self.obs_body_vel-ref_body_vel))
+        r_link_rot_im = coef.w_r * _exp_neg_square(coef.k_r, (self.obs_body_quat-ref_body_rot))
+        
+        r_im = r_dof_pos_im + r_dof_vel_im \
+            + r_link_pos_im + r_link_vel_im \
+            + r_link_rot_im
+        return r_im / 5.
     
     def _reward_contact(self):
-        return torch.ones(self.num_envs, device=self.device)
+        coef = self.cfg.reward.coef.contact
+        return torch.zeros(self.num_envs, device=self.device)
 
     def _reward_regularization(self):
-        return torch.ones(self.num_envs, device=self.device)
+        coef = self.cfg.reward.coef.regularization
+        r_a_reg = coef.w_a * _exp_neg_square(coef.q_a, self.actions)
+        r_s_reg = coef.w_s * _exp_neg_square(coef.q_s, (self.actions-self.prev_actions))
+        
+        r_reg = r_a_reg + r_s_reg
+        return r_reg / 2.
     
     #------------ helper functions----------------
     def sample_action(self):
@@ -328,17 +379,17 @@ class MotionTrackingFromSparseSensor(BaseTask):
     def _every_env_ids(self):
         return to_torch([x for x in range(self.num_envs)], dtype=torch.long, device=self.device)
     
-    def _to_avatar_centric_coord_p(self, pos):
-        base_pos = torch.clone(self.root_pos)
+    def _to_avatar_centric_coord_p(self, pos, root_state):
+        base_pos = torch.clone(root_state[:, 0:3])
         base_pos[:,2] = 0
         base_pos_expand = base_pos.unsqueeze(-2)
         base_pos_expand = base_pos_expand.repeat((1, pos.shape[1], 1))  # TODO: repeat을 하지 않아도 결과가 같음.
         relative_pos = pos - base_pos_expand
         
-        return self._to_avatar_centric_coord_v(relative_pos)
+        return self._to_avatar_centric_coord_v(relative_pos, root_state)
     
-    def _to_avatar_centric_coord_v(self, vec):
-        heading_rot = calc_heading_quat_inv(self.root_quat)
+    def _to_avatar_centric_coord_v(self, vec, root_state):
+        heading_rot = calc_heading_quat_inv(root_state[:, 3:7])
         heading_rot_expand = heading_rot.unsqueeze(-2)
         heading_rot_expand = heading_rot_expand.repeat((1, vec.shape[1], 1))
         
@@ -349,8 +400,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         return flat_local_vec
     
-    def _to_avatar_centric_coord_r(self, quat):
-        inv_root_quat = -self.root_quat
+    def _to_avatar_centric_coord_r(self, quat, root_state):
+        inv_root_quat = -root_state[:, 3:7]
         inv_root_quat[:,-1] *= -1. 
         inv_root_quat_expand = inv_root_quat.unsqueeze(-2)
         inv_root_quat_expand = inv_root_quat_expand.repeat((1, quat.shape[1], 1))
@@ -361,3 +412,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         flat_local_quat = local_quat.view(quat.shape[0], quat.shape[1] * quat.shape[2])
         
         return flat_local_quat
+    
+@torch.jit.script
+def _exp_neg_square(coef: float, tensor: torch.Tensor) -> torch.Tensor:
+    return torch.sum(torch.exp(-coef * (torch.pow(tensor, 2))), 1) / tensor.shape[1]

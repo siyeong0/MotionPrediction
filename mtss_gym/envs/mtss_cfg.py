@@ -38,30 +38,36 @@ class MtssCfg(BaseConfig):
     class motion:
         dir = "resources/test"
         files = os.listdir(dir)
+        
     class reward:
         functions = ["imitation", "contact", "regularization"]
         class coef:
+            w_i = 1.0
+            w_c = 1.0
+            w_r = 0.2
             class imitation:
-                q = 1.0
-                qv = 1.0
-                p = 1.0
-                pv = 1.0
-                r = 1.0
+                w_q = 1.0
+                w_qv = 0.2
+                w_p = 1.0
+                w_pv = 0.2
+                w_r = 0.2
+                
+                k_q = 1.0
+                k_qv = 1.0
+                k_p = 1.0
+                k_pv = 1.0
+                k_r = 1.0
             class contact:
-                c = 1.0
+                w_c = 1.0
+                q_c = 1.0
             class regularization:
-                a = 1.0
-                s = 1.0
+                w_a = 1.0
+                w_s = 1.0
+                
+                q_a = 1.0
+                q_s = 1.0
             
     class normalization:
-        class obs_scales:
-            dof_pos = 1.0
-            dof_vel = 1.0
-            body_pos = 1.0
-            body_vel = 1.0
-            body_quat = 1.0
-            body_ang_vel = 1.0
-            contact_force = 1.0
         clip_observations = 100.
         clip_actions = 100.
 
@@ -74,7 +80,7 @@ class MtssCfg(BaseConfig):
     class sim:
         use_gpu = True
         dt = 0.0333
-        control_dt = 0.5 # timestep to update control values (sec)
+        control_dt = 0.1 # timestep to update control values (sec)
         substeps = 1
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z
@@ -96,9 +102,9 @@ class MtssPPOCfg(BaseConfig):
     runner_class_name = 'OnPolicyRunner'
     class policy:
         init_noise_std = 1.0
-        actor_hidden_dims = [512, 256, 128]
-        critic_hidden_dims = [512, 256, 128]
-        activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
+        actor_hidden_dims = [300, 200, 100]
+        critic_hidden_dims = [400, 400, 300, 200]
+        activation = 'tanh' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
         # only for 'ActorCriticRecurrent':
         # rnn_type = 'lstm'
         # rnn_hidden_size = 512
@@ -112,9 +118,9 @@ class MtssPPOCfg(BaseConfig):
         entropy_coef = 0.01
         num_learning_epochs = 5
         num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
-        learning_rate = 1.e-3 #5.e-4
+        learning_rate = 1.2e-4
         schedule = 'adaptive' # could be adaptive, fixed
-        gamma = 0.99
+        gamma = 0.97
         lam = 0.95
         desired_kl = 0.01
         max_grad_norm = 1.

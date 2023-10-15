@@ -34,7 +34,7 @@ class Motion:
             self.motion_idxs[env_id] = np.random.randint(len(self.motion_libs))  
             self.motion_ids[env_id] = self.sample_motion(env_id)
             #self.curr_time[env_id] = self.sample_time(env_id)
-            self.curr_time[env_id] = 0.0
+            self.curr_time[env_id] = 0.1    # ignore first frame; t-pose frame
             
     def get_motion_lib(self, env_id) -> MotionLib:
         return self.motion_libs[self.motion_idxs[env_id]]
@@ -55,7 +55,7 @@ class Motion:
             if time > self.start_limit and time < self.get_motion_length(env_id) - self.min_length:
                 return time
             
-    def get_motion_state(self, env_ids):
+    def step_motion_state(self, env_ids):
         env_ids = env_ids.cpu().numpy()
         
         states = []
@@ -68,12 +68,35 @@ class Motion:
             
         root_pos = torch.stack([s[0][0] for s in states], dim=0)
         root_rot = torch.stack([s[1][0] for s in states], dim=0)
-        dof_pos = torch.stack([s[2][0] for s in states], dim=0)
-        root_vel = torch.stack([s[3][0] for s in states], dim=0)
-        root_ang_vel = torch.stack([s[4][0] for s in states], dim=0)
+        root_vel = torch.stack([s[2][0] for s in states], dim=0)
+        root_ang_vel = torch.stack([s[3][0] for s in states], dim=0)
+        dof_pos = torch.stack([s[4][0] for s in states], dim=0)
         dof_vel = torch.stack([s[5][0] for s in states], dim=0)
         key_pos = torch.stack([s[6][0] for s in states], dim=0)
+        key_vel = torch.stack([s[7][0] for s in states], dim=0)
+        key_rot = torch.stack([s[8][0] for s in states], dim=0)
             
-        return (root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos), dones
+        return (root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot), dones
+    
+    def get_motion_state(self, env_ids):
+        env_ids = env_ids.cpu().numpy()
+        
+        states = []
+        dones = []
+        for env_id in env_ids:
+            states.append(list(self.get_motion_lib(env_id).get_motion_state(
+                np.array([self.motion_ids[env_id]]), np.array([self.curr_time[env_id]]))))
+            
+        root_pos = torch.stack([s[0][0] for s in states], dim=0)
+        root_rot = torch.stack([s[1][0] for s in states], dim=0)
+        root_vel = torch.stack([s[2][0] for s in states], dim=0)
+        root_ang_vel = torch.stack([s[3][0] for s in states], dim=0)
+        dof_pos = torch.stack([s[4][0] for s in states], dim=0)
+        dof_vel = torch.stack([s[5][0] for s in states], dim=0)
+        key_pos = torch.stack([s[6][0] for s in states], dim=0)
+        key_vel = torch.stack([s[7][0] for s in states], dim=0)
+        key_rot = torch.stack([s[8][0] for s in states], dim=0)
+            
+        return (root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot)
             
         
