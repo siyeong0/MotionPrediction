@@ -34,7 +34,7 @@ class Motion:
             self.motion_idxs[env_id] = np.random.randint(len(self.motion_libs))  
             self.motion_ids[env_id] = self.sample_motion(env_id)
             #self.curr_time[env_id] = self.sample_time(env_id)
-            self.curr_time[env_id] = 0.1    # ignore first frame; t-pose frame
+            self.curr_time[env_id] = self.dt * 2.    # ignore first frame; t-pose frame
             
     def get_motion_lib(self, env_id) -> MotionLib:
         return self.motion_libs[self.motion_idxs[env_id]]
@@ -76,13 +76,13 @@ class Motion:
         key_vel = torch.stack([s[7][0] for s in states], dim=0)
         key_rot = torch.stack([s[8][0] for s in states], dim=0)
             
+        root_pos[:,2] -= 0.05
         return (root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot), dones
     
     def get_motion_state(self, env_ids):
         env_ids = env_ids.cpu().numpy()
         
         states = []
-        dones = []
         for env_id in env_ids:
             states.append(list(self.get_motion_lib(env_id).get_motion_state(
                 np.array([self.motion_ids[env_id]]), np.array([self.curr_time[env_id]]))))
@@ -97,6 +97,8 @@ class Motion:
         key_vel = torch.stack([s[7][0] for s in states], dim=0)
         key_rot = torch.stack([s[8][0] for s in states], dim=0)
             
+        root_pos[:,2] -= 0.05
+        key_pos[:,:,2] -= 0.05
         return (root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot)
             
         

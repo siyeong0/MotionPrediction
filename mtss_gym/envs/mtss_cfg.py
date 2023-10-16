@@ -4,7 +4,7 @@ from .base_cfg import BaseConfig
 class MtssCfg(BaseConfig):
     class env:
         num_envs = 64
-        num_observations = 374
+        num_observations = 335
         num_stack = 6
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
@@ -33,7 +33,8 @@ class MtssCfg(BaseConfig):
         
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         
-        sensor_body_name = ["head", "left_hand", "right_hand"]
+        pos_sensor_body_names = ["head", "left_hand", "right_hand"]
+        force_sensor_body_names = ["left_foot", "right_foot"]
         
     class motion:
         dir = "resources/test"
@@ -42,9 +43,9 @@ class MtssCfg(BaseConfig):
     class reward:
         functions = ["imitation", "contact", "regularization"]
         class coef:
-            w_i = 1.0
-            w_c = 1.0
-            w_r = 0.2
+            w_i = 0.9
+            w_c = 0.0
+            w_r = 0.1
             class imitation:
                 w_q = 0.4
                 w_qv = 0.1
@@ -58,11 +59,11 @@ class MtssCfg(BaseConfig):
                 k_pv = 2.0
                 k_r = 0.01
             class contact:
-                w_c = 1.0
-                q_c = 1.0
+                w_c = 0.5
+                q_c = 0.5
             class regularization:
-                w_a = 1.0
-                w_s = 1.0
+                w_a = 0.5
+                w_s = 0.5
                 
                 q_a = 1.0
                 q_s = 1.0
@@ -118,7 +119,7 @@ class MtssPPOCfg(BaseConfig):
         entropy_coef = 0.01
         num_learning_epochs = 5
         num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
-        learning_rate = 1.2e-4
+        learning_rate = 1.2e-3
         schedule = 'adaptive' # could be adaptive, fixed
         gamma = 0.97
         lam = 0.95
@@ -128,7 +129,7 @@ class MtssPPOCfg(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 15 # per iteration
+        num_steps_per_env = 64 # per iteration
         max_iterations = 1500 # number of policy updates
 
         # logging
