@@ -8,7 +8,7 @@ from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
 from mtss_gym.envs.mtss_cfg import MtssCfg, MtssPPOCfg
 
 if __name__ == "__main__":
-    env = MotionTrackingFromSparseSensor(MtssCfg(), gymapi.SIM_PHYSX, "cuda:0", False)
+    env = MotionTrackingFromSparseSensor(MtssCfg(), gymapi.SIM_PHYSX, "cuda", False)
 
-    ppo_runner = OnPolicyRunner(env, class_to_dict(MtssPPOCfg), get_log_dir("logs", "mtss"), device="cuda:0")
+    ppo_runner = OnPolicyRunner(env, class_to_dict(MtssPPOCfg), get_log_dir("logs", "mtss"), device="cuda")
     ppo_runner.learn(num_learning_iterations=MtssPPOCfg.runner.max_iterations, init_at_random_ep_len=True)

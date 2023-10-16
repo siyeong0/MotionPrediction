@@ -3,8 +3,9 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 64
-        num_observations = 335
+        num_envs = 2
+        num_observations2 = 335
+        num_observations = 90
         num_stack = 6
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
@@ -102,7 +103,7 @@ class MtssPPOCfg(BaseConfig):
     seed = 1
     runner_class_name = 'OnPolicyRunner'
     class policy:
-        init_noise_std = 0.03
+        init_noise_std = 1.0
         actor_hidden_dims = [300, 200, 100]
         critic_hidden_dims = [400, 400, 300, 200]
         activation = 'tanh' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
@@ -116,7 +117,7 @@ class MtssPPOCfg(BaseConfig):
         value_loss_coef = 1.0
         use_clipped_value_loss = True
         clip_param = 0.2
-        entropy_coef = 0.01
+        entropy_coef = 0.0
         num_learning_epochs = 5
         num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = 1.2e-3
@@ -129,7 +130,7 @@ class MtssPPOCfg(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 64 # per iteration
+        num_steps_per_env = 1000 # per iteration
         max_iterations = 1500 # number of policy updates
 
         # logging

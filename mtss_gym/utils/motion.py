@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from isaacgymenvs.tasks.amp.utils_amp.motion_lib import MotionLib
+from mtss_gym.utils.motion_lib import MotionLib
 
 class Motion:
     def __init__(self, files, num_envs, dt, start_limit, min_length, num_dof, num_bodies, device):
@@ -97,8 +97,8 @@ class Motion:
         key_vel = torch.stack([s[7][0] for s in states], dim=0)
         key_rot = torch.stack([s[8][0] for s in states], dim=0)
             
-        root_pos[:,2] -= 0.05
-        key_pos[:,:,2] -= 0.05
+        # root_pos[:,2] -= 0.05
+        # key_pos[:,:,2] -= 0.05
         return (root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot)
             
         

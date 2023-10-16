@@ -72,9 +72,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
 
         self.pre_physics_step()
-        for _ in range(self.num_update):
-            self.gym.simulate(self.sim)
-            self.render()
+        self.gym.simulate(self.sim)
+        self.render()
         self.post_physics_step()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
@@ -145,7 +144,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         if "regularization" in self.cfg.reward.functions:
             self.rew_buf += coef.w_r * self._reward_regularization()
     
-    def compute_observations(self):
+    def compute_observations2(self):
         # simulated character observation 
         self.obs_dof_pos = torch.flatten(self.dof_pos, 1)
         self.obs_dof_vel = torch.flatten(self.dof_vel, 1)
@@ -167,6 +166,9 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         # concat
         self.obs_buf = torch.cat((obs_sim, obs_user), dim=-1)
+        
+    def compute_observations(self):
+        self.obs_buf = torch.cat((torch.flatten(self.motion_link_state_buf[:,:,0:3] ,1), torch.flatten(self.glob_body_pos[:,:,:] ,1)), dim=-1)
 
     def create_sim(self):
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
@@ -330,7 +332,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         
     #------------ reward functions----------------
-    def _reward_imitation(self):
+    def _reward_imitation2(self):
         coef = self.cfg.reward.coef.imitation
         ref_dof_pos = torch.flatten(self.motion_dof_state_buf[:,:,0], 1)
         ref_dof_vel = torch.flatten(self.motion_dof_state_buf[:,:,1], 1)
@@ -344,16 +346,14 @@ class MotionTrackingFromSparseSensor(BaseTask):
         r_link_vel_im = coef.w_qv * _exp_neg_square(coef.k_qv, (self.obs_body_vel-ref_body_vel))
         r_link_rot_im = coef.w_r * _exp_neg_square(coef.k_r, (self.obs_body_quat-ref_body_rot))
         
-        r_dof_pos_im = coef.w_p * _exp_neg_square(coef.k_p, (self.obs_dof_pos-ref_dof_pos))
-        r_dof_vel_im = coef.w_pv * _exp_neg_square(coef.k_pv, (self.obs_dof_vel-ref_dof_vel))
-        r_link_pos_im = coef.w_q * _exp_neg_square(coef.k_q, (self.obs_body_pos-ref_body_pos))
-        r_link_vel_im = coef.w_qv * _exp_neg_square(coef.k_qv, (self.obs_body_vel-ref_body_vel))
-        r_link_rot_im = coef.w_r * _exp_neg_square(coef.k_r, (self.obs_body_quat-ref_body_rot))
-        
         r_im = r_dof_pos_im + r_dof_vel_im \
             + r_link_pos_im + r_link_vel_im \
             + r_link_rot_im
         return r_im
+    def _reward_imitation(self):
+        ref = torch.flatten(self.motion_link_state_buf[:,:,0:3] ,1)
+        sim = torch.flatten(self.glob_body_pos[:,:,:] ,1)
+        return _exp_neg_square(40.0, ref-sim)
     
     def _reward_contact(self):
         coef = self.cfg.reward.coef.contact
@@ -365,6 +365,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         r_s_reg = coef.w_s * _exp_neg_square(coef.q_s, (self.actions-self.prev_actions))
         
         r_reg = r_a_reg + r_s_reg
+        return torch.zeros(self.num_envs, device=self.device)
         return r_reg
     
     #------------ helper functions----------------
