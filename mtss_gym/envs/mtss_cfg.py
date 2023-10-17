@@ -3,7 +3,7 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 512
+        num_envs = 32
         num_observations2 = 335
         num_observations = 90
         num_stack = 6

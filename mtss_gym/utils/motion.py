@@ -37,9 +37,8 @@ class Motion:
                                    key_body_ids=np.array([x for x in range(num_bodies)]),
                                    device=self.device)
             # import to tensor
-            num_frames = motion_lib.get_motion_num_frames(0)
-            num_pose = int(num_frames / self.frame_stride)
-            motion_lengths.append(num_pose)
+            num_frames = int(motion_lib.get_motion_length(0) / self.dt)
+            motion_lengths.append(num_frames)
             # buffers
             root_pos_tensors = []
             root_rot_tensors = []
@@ -51,7 +50,7 @@ class Motion:
             key_vel_tensors = []
             key_rot_tensors = []
             # to torch tensor
-            for n in range(num_pose):
+            for n in range(num_frames):
                 state = motion_lib.get_motion_state(np.array([0]), np.array([self.dt * n]))
                 root_pos, root_rot ,root_vel, root_ang_vel, dof_pos, dof_vel, key_pos, key_vel, key_rot = state
                 root_pos_tensors.append(root_pos[0])
