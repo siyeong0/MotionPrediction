@@ -79,6 +79,9 @@ class MotionLib():
 
     def get_motion_length(self, motion_ids):
         return self._motion_lengths[motion_ids]
+    
+    def get_motion_num_frames(self, motion_ids):
+        return self._motion_num_frames[motion_ids]
 
     def get_motion_state(self, motion_ids, motion_times):
         n = len(motion_ids)

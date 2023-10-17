@@ -18,9 +18,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.min_episode_length_s = self.cfg.env.min_episode_length_s
         self.max_episode_length_s = self.cfg.env.max_episode_length_s
         self.dt = cfg.sim.dt
-        self.control_dt = cfg.sim.control_dt
-        self.max_episode_length = np.ceil(self.max_episode_length_s / self.control_dt)
-        self.num_update = int(self.control_dt / self.dt)
+        self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
         # parse simulation params
         sim_params = gymapi.SimParams()
         sim_params.use_gpu_pipeline = cfg.sim.use_gpu
@@ -51,19 +49,14 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self._load_motions()
         
     def play(self):
-        self.control_dt = self.dt
-        self.num_update = 1
-        self.motion.dt = self.dt
         while True:
             # play randomly selected motion
             env_ids = self._every_env_ids()
-            state, done = self.motion.step_motion_state(env_ids)
-            self.motion_end_buf[env_ids] = to_torch(done, dtype=torch.bool, device=self.device)
+            state = self.motion.get_motion_state(env_ids)
             self._set_env_state(env_ids, state)
             # simulate
-            for _ in range(self.num_update):
-                self.gym.simulate(self.sim)
-                self.render()
+            self.gym.simulate(self.sim)
+            self.render()
             # refresh actor states and steps additional works
             self.post_physics_step()
         
@@ -242,7 +235,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         files = self.cfg.motion.files
         self.motion = Motion([f"{dir}/{file}" for file in files],
                              self.num_envs, 
-                             self.control_dt, 0.0,
+                             self.dt, 0.0,
                              self.min_episode_length_s,
                              self.num_dofs, self.num_bodies,
                              self.device)

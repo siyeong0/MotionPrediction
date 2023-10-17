@@ -3,7 +3,7 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 2
+        num_envs = 512
         num_observations2 = 335
         num_observations = 90
         num_stack = 6
@@ -82,7 +82,6 @@ class MtssCfg(BaseConfig):
     class sim:
         use_gpu = True
         dt = 1/36
-        control_dt = 1/36 # timestep to update control values (sec)
         substeps = 2
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z
