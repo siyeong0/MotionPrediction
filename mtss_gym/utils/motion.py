@@ -8,7 +8,6 @@ class Motion:
         self.num_envs = num_envs
         self.num_motions = len(files)
         self.dt = dt
-        self.frame_stride = int(1 / self.dt)
         self.start_limit = start_limit
         self.min_length = min_length
         self.device = device
