@@ -22,9 +22,6 @@ class Motion:
         
         self.state = torch.zeros(num_envs, 13+2*num_dofs+10*num_bodies, device=device, dtype=torch.float32)
         
-    def initialize(self, state, env_ids):
-        self.state[env_ids] = state
-        
     def _load(self, files):
         motion_lengths = []
         for i, file in enumerate(files):
@@ -54,7 +51,7 @@ class Motion:
             # print progress
             num_1_per = int(self.num_motions / 100)
             if num_1_per == 0 or ((i+1) % num_1_per) == 0:
-                print("{:d} / {:d} ... {:d}%".format(i+1, self.num_motions, int((i+1) / self.num_motions)))
+                print("{:d} / {:d} ... {:d}%".format(i+1, self.num_motions, int((i+1) / self.num_motions * 100)))
             print("")
         self._motion_lengths = torch.tensor(motion_lengths, device=self.device, dtype=torch.long)
         
