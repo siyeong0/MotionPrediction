@@ -3,7 +3,7 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 32
+        num_envs = 1024
         num_observations2 = 335
         num_observations = 90
         num_stack = 6
@@ -11,8 +11,7 @@ class MtssCfg(BaseConfig):
         num_actions = 28
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
-        min_episode_length_s = 0 # episode length in seconds
-        max_episode_length_s = 180
+        max_episode_length_s = 180 # max episode length in seconds
 
     class asset:
         file = "resources/humanoid.xml"
