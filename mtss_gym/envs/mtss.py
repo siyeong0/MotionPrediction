@@ -3,9 +3,9 @@ import os
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat_inv, my_quat_rotate, calc_heading_quat_inv
-from mtss_gym.utils.motion import Motion, MotionState
-
+from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat, my_quat_rotate, calc_heading_quat_inv
+from mtss_gym.utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep
+from mtss_gym.utils.motion import Motion
 from mtss_gym.envs.base_task import BaseTask
 from mtss_gym.envs.mtss_cfg import MtssCfg
 
@@ -85,15 +85,12 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
+        # compute reward before update motion buffer 
+        self.compute_reward()
         # motion step
-        env_ids = self._every_env_ids()
-        state, done = self.motion.step_motion_state(env_ids)
-        self.motion_root_state_buf = state.root_state
-        self.motion_dof_state_buf = state.dof_state
-        self.motion_link_state_buf = state.link_state
-        self.motion_end_buf[env_ids] = to_torch(done, dtype=torch.bool, device=self.device)
+        self._step_motion_state(self._every_env_ids())
 
-        # compute observations, rewards, resets, ...
+        # reset environments
         self.check_termination()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
@@ -107,7 +104,6 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
         
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
-        self.compute_reward()
 
     def check_termination(self):
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
@@ -119,69 +115,64 @@ class MotionTrackingFromSparseSensor(BaseTask):
             return
         
         # reset robot states
-        self._reset_actors(env_ids)
-        # reset motion state buffer
-        self.motion_state_buf = self.motion.get_motion_state(self._every_env_ids())
+        self.motion.reset(env_ids)
+        # fill sensor observation history 
+        for i in reversed(range(self.num_stack-1)):
+            self._step_motion_state(env_ids)
+            self.sensor_obs_hist[env_ids, i, :] = compute_user_observation(self.motion_root_state_buf, self.motion_link_state_buf[:,:,0:3], self.motion_link_state_buf[:,:,6:10], self.pos_sensor_indices)
+        # initialize motion state buffer and set actor root and dof state
+        state = self.motion.get_motion_state(env_ids)
+        self._init_env_state(env_ids, state)
 
         # reset buffers
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+        
+    def _reset_actors(self, env_ids):
+        self.motion.reset(env_ids)
+        # fill sensor observation history 
+        for i in reversed(range(self.num_stack-1)):
+            self._step_motion_state(env_ids)
+            self.sensor_obs_hist[env_ids, i, :] = compute_user_observation(self.motion_root_state_buf, self.motion_link_state_buf[:,:,0:3], self.motion_link_state_buf[:,:,6:10], self.pos_sensor_indices)
+        # initialize motion state buffer and set actor root and dof state
+        state = self.motion.get_motion_state(env_ids)
+        self._init_env_state(env_ids, state)
     
+    def compute_observations(self):
+        # simulated character observation 
+        obs_sim = compute_sim_observation(self.root_states, self.dof_pos, self.dof_vel, self.glob_body_pos, self.glob_body_quat, self.glob_body_vel, self.glob_body_ang_vel, self.contact_force)
+        # user sensor position observation
+        self.sensor_obs_hist[:, 1:self.num_stack] = self.sensor_obs_hist[:, 0:self.num_stack-1] # assert num_stack > 1
+        self.sensor_obs_hist[:, 0,:] = compute_user_observation(self.motion_root_state_buf, self.motion_link_state_buf[:,:,0:3], self.motion_link_state_buf[:,:,6:10], self.pos_sensor_indices)
+        obs_user = torch.flatten(self.sensor_obs_hist, 1)
+        # height map observation
+        # TODO:
+        pass
+        
+        # concat
+        self.obs_buf = torch.cat((obs_sim, obs_user), dim=1)
+        
     def compute_reward(self):
         coef = self.cfg.reward.coef
         self.rew_buf[:] = 0.
         if "imitation" in self.cfg.reward.functions:
-            self.rew_buf += coef.w_i * self._reward_imitation()
+            self.rew_buf += coef.w_i * compute_imitation_reward(coef.imitation, self.obs_buf, self.motion_root_state_buf, self.motion_dof_state_buf, self.motion_link_state_buf)
         if "contact" in self.cfg.reward.functions:
-            self.rew_buf += coef.w_c * self._reward_contact()
+            pass
+            # self.rew_buf += coef.w_c * compute_contact_reward()
         if "regularization" in self.cfg.reward.functions:
-            self.rew_buf += coef.w_r * self._reward_regularization()
-    
-    def compute_observations2(self):
-        # simulated character observation 
-        self.obs_dof_pos = torch.flatten(self.dof_pos, 1)
-        self.obs_dof_vel = torch.flatten(self.dof_vel, 1)
-        self.obs_body_pos = _to_avatar_centric_coord_p(self.glob_body_pos, self.root_states)
-        self.obs_body_vel = _to_avatar_centric_coord_v(self.glob_body_vel, self.root_states)
-        self.obs_body_quat = _to_avatar_centric_coord_r(self.glob_body_quat, self.root_states)
-        self.obs_body_ang_vel = _to_avatar_centric_coord_v(self.glob_body_ang_vel, self.root_states)
-        self.obs_contact_force = torch.flatten(self.contact_force[:, self.force_sensor_indices, :], 1)
-        
-        obs_sim = torch.cat((self.obs_dof_pos,self.obs_dof_vel,
-                             self.obs_body_pos,self.obs_body_vel,
-                             self.obs_body_quat,self.obs_body_ang_vel,
-                             self.obs_contact_force), dim=-1)
-        # sensor position observation
-        if self.num_stack > 1:
-            self.sensor_obs_hist[:, 1:self.num_stack] = self.sensor_obs_hist[:, 0:self.num_stack-1]
-        self.sensor_obs_hist[:, 0,:] = _make_sensor_obs(self.num_envs, self.motion_state_buf, self.pos_sensor_indices)
-        obs_user = torch.flatten(self.sensor_obs_hist, 1)
-        
-        # concat
-        self.obs_buf = torch.cat((obs_sim, obs_user), dim=-1)
-        
-    def compute_observations(self):
-        self.obs_buf = torch.cat((torch.flatten(self.motion_link_state_buf[:,:,0:3] ,1), torch.flatten(self.glob_body_pos[:,:,:] ,1)), dim=-1)
+            pass
+            # self.rew_buf += coef.w_r * compute_regularization_reward()
 
     def create_sim(self):
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         self._create_ground_plane()
         self._create_envs()
-
+        
     def set_camera(self, position, lookat):
         cam_pos = gymapi.Vec3(position[0], position[1], position[2])
         cam_target = gymapi.Vec3(lookat[0], lookat[1], lookat[2])
         self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
-
-    def _reset_actors(self, env_ids):
-        self.motion.reset(env_ids)
-        # fill sensor observation history 
-        for i in reversed(range(self.num_stack-1)):
-            state, done = self.motion.step_motion_state(env_ids)
-            self.sensor_obs_hist[env_ids, i, :] = _make_sensor_obs(env_ids, state, self.pos_sensor_indices)
-        # initialize motion state buffer and set actor root and dof state
-        state = self.motion.get_motion_state(env_ids)
-        self._set_env_state(env_ids, state)
 
     #----------------------------------------
     def _init_buffers(self):
@@ -227,7 +218,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         self.motion_end_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.fall_down_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        self.sensor_obs_hist = torch.zeros(self.num_envs, self.num_stack, (3+4+3+3), device=self.device)
+        self.sensor_obs_hist = torch.zeros(self.num_envs, self.num_stack, (3+6+3+3), device=self.device)
         
     def _load_motions(self):
         self.motion_libs = []
@@ -239,6 +230,13 @@ class MotionTrackingFromSparseSensor(BaseTask):
                              self.num_stack,
                              self.num_dofs, self.num_bodies,
                              self.device)
+        
+    def _step_motion_state(self, env_ids):
+        state, done = self.motion.step_motion_state(env_ids)
+        self.motion_root_state_buf[env_ids] = state.root_state
+        self.motion_dof_state_buf[env_ids] = state.dof_state
+        self.motion_link_state_buf[env_ids] = state.link_state
+        self.motion_end_buf[env_ids] = to_torch(done, dtype=torch.bool, device=self.device)
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -304,6 +302,19 @@ class MotionTrackingFromSparseSensor(BaseTask):
         for i in range(len(force_sensor_names)):
             self.force_sensor_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], force_sensor_names[i])
             
+    def _init_env_state(self, env_ids, state):
+        self.root_states[env_ids, :] = 0.0
+        self.root_states[env_ids, 0:2] = state.root_state[:, 0:2]
+        self.root_states[env_ids, 2:3] = 0.89
+        self.root_states[env_ids, 3:7] = state.root_state[:, 3:7]
+        self.dof_state[env_ids, :, :] = 0
+        
+        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states), 
+                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
+                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+            
     def _set_env_state(self, env_ids, state):
         self.root_states[env_ids, :] = state.root_state[:,:]
         self.dof_state[env_ids, :, :] = state.dof_state[:,:,:]
@@ -314,43 +325,6 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         
-    #------------ reward functions----------------
-    def _reward_imitation2(self):
-        coef = self.cfg.reward.coef.imitation
-        ref_dof_pos = torch.flatten(self.motion_dof_state_buf[:,:,0], 1)
-        ref_dof_vel = torch.flatten(self.motion_dof_state_buf[:,:,1], 1)
-        ref_body_pos = _to_avatar_centric_coord_p(self.motion_link_state_buf[:,:,0:3], self.motion_root_state_buf)
-        ref_body_vel = _to_avatar_centric_coord_v(self.motion_link_state_buf[:,:,3:6], self.motion_root_state_buf)
-        ref_body_rot = _to_avatar_centric_coord_r(self.motion_link_state_buf[:,:,6:10], self.motion_root_state_buf)
-        
-        r_dof_pos_im = coef.w_p * _exp_neg_square(coef.k_p, (self.obs_dof_pos-ref_dof_pos))
-        r_dof_vel_im = coef.w_pv * _exp_neg_square(coef.k_pv, (self.obs_dof_vel-ref_dof_vel))
-        r_link_pos_im = coef.w_q * _exp_neg_square(coef.k_q, (self.obs_body_pos-ref_body_pos))
-        r_link_vel_im = coef.w_qv * _exp_neg_square(coef.k_qv, (self.obs_body_vel-ref_body_vel))
-        r_link_rot_im = coef.w_r * _exp_neg_square(coef.k_r, (self.obs_body_quat-ref_body_rot))
-        
-        r_im = r_dof_pos_im + r_dof_vel_im \
-            + r_link_pos_im + r_link_vel_im \
-            + r_link_rot_im
-        return r_im
-    def _reward_imitation(self):
-        ref = torch.flatten(self.motion_link_state_buf[:,:,0:3] ,1)
-        sim = torch.flatten(self.glob_body_pos[:,:,:] ,1)
-        return _exp_neg_square(40.0, ref-sim)
-    
-    def _reward_contact(self):
-        coef = self.cfg.reward.coef.contact
-        return torch.zeros(self.num_envs, device=self.device)
-
-    def _reward_regularization(self):
-        coef = self.cfg.reward.coef.regularization
-        r_a_reg = coef.w_a * _exp_neg_square(coef.q_a, self.actions)
-        r_s_reg = coef.w_s * _exp_neg_square(coef.q_s, (self.actions-self.prev_actions))
-        
-        r_reg = r_a_reg + r_s_reg
-        return torch.zeros(self.num_envs, device=self.device)
-        return r_reg
-    
     #------------ helper functions----------------
     def sample_action(self):
         action = (torch.rand(self.num_envs, self.num_actions) - 0.5) * 5.0
@@ -359,47 +333,112 @@ class MotionTrackingFromSparseSensor(BaseTask):
     def _every_env_ids(self):
         return to_torch([x for x in range(self.num_envs)], dtype=torch.long, device=self.device)
         
-def _to_avatar_centric_coord_p(pos, root_state):
+#@torch.jit.script
+def compute_sim_observation(root_state, dof_pos, dof_vel, link_pos, link_quat, link_vel, link_ang_vel, contact_force):
+    num_envs = root_state.shape[0]
+    # base_pos is pos that projects the pervis pos on ground
     base_pos = torch.clone(root_state[:, 0:3])
     base_pos[:,2] = 0
-    base_pos_expand = base_pos.unsqueeze(-2)
-    base_pos_expand = base_pos_expand.repeat((1, pos.shape[1], 1))  # TODO: repeat을 하지 않아도 결과가 같음.
-    relative_pos = pos - base_pos_expand
+    # base_quat is quaternion represents avatar's heading; yaw
+    inv_base_quat = calc_heading_quat_inv(root_state[:,3:7])
+    # preproces inputs. prefix c means variable for calculating
+    c_base_pos = base_pos.unsqueeze(1).repeat(1, link_pos.shape[1], 1).view(-1, 3)    # (1, num_links, 1)
+    c_inv_base_quat = inv_base_quat.unsqueeze(1).repeat(1, link_pos.shape[1], 1).view(-1, 4)
+    c_link_pos = link_pos.view(-1,3)
+    c_link_quat = link_quat.view(-1,4)
+    c_link_vel = link_vel.view(-1,3)
+    c_link_ang_vel = link_ang_vel.view(-1,3)
     
-    return _to_avatar_centric_coord_v(relative_pos, root_state)
+    # ac means avatarcentric
+    # nn_rep means first and second columns of 3x3 rotation matrix
+    # all tensors are flattened
+    ac_dof_pos          = torch.flatten(dof_pos, 1) # not affected
+    ac_dof_vel          = torch.flatten(dof_vel, 1) # not affected
+    ac_link_pos         = torch.flatten(quat_rotate(c_inv_base_quat, (c_link_pos - c_base_pos)).view(num_envs, -1), 1)
+    ac_link_ori         = torch.flatten(quat_to_nn_rep(quat_mul(c_link_quat, c_inv_base_quat)).view(num_envs, -1), 1) # quat_mul(target, transform)
+    ac_link_vel         = torch.flatten(quat_rotate(c_inv_base_quat, c_link_vel).view(num_envs, -1), 1)
+    ac_link_ang_vel     = torch.flatten(quat_rotate(c_inv_base_quat, c_link_ang_vel).view(num_envs, -1), 1)
+    ac_contact_force    = torch.flatten(contact_force, 1) # not affected
+    return torch.cat((ac_dof_pos, ac_dof_vel, 
+                      ac_link_pos, ac_link_ori, 
+                      ac_link_vel, ac_link_ang_vel, 
+                      ac_contact_force), dim=1)
 
-def _to_avatar_centric_coord_v(vec, root_state):
-    heading_rot = calc_heading_quat_inv(root_state[:, 3:7])
-    heading_rot_expand = heading_rot.unsqueeze(-2)
-    heading_rot_expand = heading_rot_expand.repeat((1, vec.shape[1], 1))
+#@torch.jit.script
+def compute_user_observation(root_state, link_pos, link_quat, sensor_indices):
+    key_pos = link_pos[:, sensor_indices]
+    key_quat = link_quat[:, sensor_indices[0]]  # first element of sensor_indices is headset index
+    num_envs = root_state.shape[0]
+    # base_pos is pos that projects the pervis pos on ground
+    base_pos = torch.clone(root_state[:, 0:3])
+    base_pos[:,2] = 0
+    # base_quat is quaternion represents avatar's heading; yaw
+    inv_base_quat = calc_heading_quat_inv(root_state[:,3:7])
+    # preproces inputs. prefix c means variable for calculating
+    c_base_pos = base_pos.unsqueeze(1).repeat(1, key_pos.shape[1], 1).view(-1, 3)    # (1, num_pos_sensors, 1)
+    c_inv_base_quat = inv_base_quat.unsqueeze(1).repeat(1, key_pos.shape[1], 1).view(-1, 4)    
+    c_inv_base_quat_ori = inv_base_quat # headset orientation only
+    c_key_pos = key_pos.view(-1,3)
+    c_key_quat = key_quat.view(-1,4)
     
-    flat_vec = vec.view(vec.shape[0] * vec.shape[1], vec.shape[2])
-    flat_heading_rot = heading_rot_expand.view(heading_rot_expand.shape[0] * heading_rot_expand.shape[1], heading_rot_expand.shape[2])
-    local_vec = my_quat_rotate(flat_heading_rot, flat_vec)
-    flat_local_vec = local_vec.view(vec.shape[0], vec.shape[1] * vec.shape[2])
-    
-    return flat_local_vec
+    # ac means avatarcentric
+    # nn_rep means first and second columns of 3x3 rotation matrix
+    # all tensors are flattened
+    ac_key_pos = torch.flatten(quat_rotate(c_inv_base_quat, (c_key_pos - c_base_pos)).view(num_envs, -1), 1)
+    ac_key_ori = torch.flatten(quat_to_nn_rep(quat_mul(c_key_quat, c_inv_base_quat_ori)).view(num_envs, -1), 1) # quat_mul(target, transform)
+    return torch.cat((ac_key_pos, ac_key_ori), dim=1)
 
-def _to_avatar_centric_coord_r(quat, root_state):
-    inv_root_quat = -root_state[:, 3:7]
-    inv_root_quat[:,-1] *= -1. 
-    inv_root_quat_expand = inv_root_quat.unsqueeze(-2)
-    inv_root_quat_expand = inv_root_quat_expand.repeat((1, quat.shape[1], 1))
+#@torch.jit.script
+def compute_imitation_reward(coef, obs_buf, motion_root_state, motion_dof_state, motion_link_state):
+    num_envs = obs_buf.shape[0]
+    num_dofs = motion_dof_state.shape[1]
+    num_links = motion_link_state.shape[1]
+    # base_pos is pos that projects the pervis pos on ground
+    base_pos = torch.clone(motion_root_state[:, 0:3])
+    base_pos[:,2] = 0
+    # base_quat is quaternion represents avatar's heading; yaw
+    inv_base_quat = calc_heading_quat_inv(motion_root_state[:,3:7])
+    # preproces inputs. prefix c means variable for calculating
+    c_base_pos = base_pos.unsqueeze(1).repeat(1, motion_link_state.shape[1], 1).view(-1, 3)    # (1, num_links, 1)
+    c_inv_base_quat = inv_base_quat.unsqueeze(1).repeat(1, motion_link_state.shape[1], 1).view(-1, 4)
+    dof_pos = motion_dof_state[:,:,0:1]
+    dof_vel = motion_dof_state[:,:,1:2]
+    c_link_pos = motion_link_state[:,:,0:3].reshape(-1,3)
+    c_link_quat = motion_link_state[:,:,6:10].reshape(-1,4)
+    c_link_vel = motion_link_state[:,:,3:6].reshape(-1,3)
     
-    flat_quat = quat.view(quat.shape[0] * quat.shape[1], quat.shape[2])
-    flat_inv_root_quat = inv_root_quat_expand.view(inv_root_quat_expand.shape[0] * inv_root_quat_expand.shape[1], inv_root_quat_expand.shape[2])
-    local_quat = quat_mul(flat_inv_root_quat, flat_quat)
-    flat_local_quat = local_quat.view(quat.shape[0], quat.shape[1] * quat.shape[2])
+    # reference motions
+    ref_dof_pos          = dof_pos # not affected
+    ref_dof_vel          = dof_vel # not affected
+    ref_link_pos         = quat_rotate(c_inv_base_quat, (c_link_pos - c_base_pos)).view(num_envs, num_links, 3)
+    ref_link_ori         = quat_to_nn_rep(quat_mul(c_link_quat, c_inv_base_quat)).view(num_envs, num_links, 6) # quat_mul(target, transform)
+    ref_link_vel         = quat_rotate(c_inv_base_quat, c_link_vel).view(num_envs, num_links, 3)
+    # simulation motions
+    sim_dof_pos     = obs_buf[:, 0:num_dofs].view(num_envs, num_dofs, 1)                ; offset = num_dofs
+    sim_dof_vel     = obs_buf[:, offset:offset+num_dofs].view(num_envs, num_dofs, 1)    ; offset += num_dofs
+    sim_link_pos    = obs_buf[:, offset:offset+num_links*3].view(num_envs, num_links, 3); offset += num_links*3
+    sim_link_ori    = obs_buf[:, offset:offset+num_links*6].view(num_envs, num_links, 6); offset += num_links*6
+    sim_link_vel    = obs_buf[:, offset:offset+num_links*3].view(num_envs, num_links, 3)
     
-    return flat_local_quat
+    # compute
+    r_im_dof_pos    = torch.mean(exp_neg_norm_square(coef.k_p, (sim_dof_pos-ref_dof_pos)).view(num_envs, -1), 1)
+    r_im_dof_vel    = torch.mean(exp_neg_norm_square(coef.k_pv, (sim_dof_vel-ref_dof_vel)).view(num_envs, -1), 1)
+    r_im_link_pos   = torch.mean(exp_neg_norm_square(coef.k_q, (sim_link_pos-ref_link_pos)).view(num_envs, -1), 1)
+    r_im_link_vel   = torch.mean(exp_neg_norm_square(coef.k_qv, (sim_link_vel-ref_link_vel)).view(num_envs, -1), 1)
+    r_im_link_ori   = torch.mean(exp_neg_norm_square(coef.k_r, (torch.log(sim_link_ori-ref_link_ori))).view(num_envs, -1), 1)
+    
+    r_im = coef.w_p * r_im_dof_pos \
+        + coef.w_pv * r_im_dof_vel \
+        + coef.w_q * r_im_link_pos \
+        + coef.w_qv * r_im_link_vel \
+        + coef.w_r * r_im_link_ori
+    print(r_im)
+    return r_im
 
-def _make_sensor_obs(env_ids, state, sensor_indices):
-    root_state = state.root_state
-    key_state = state.link_state[:, sensor_indices]
-    sensor_pos = _to_avatar_centric_coord_p(key_state[:, :, 0:3], root_state)
-    headset_quat = _to_avatar_centric_coord_r(key_state[:, 0:1, 0:4], root_state)
-    return torch.cat((sensor_pos, headset_quat),dim=1)
-    
-@torch.jit.script
-def _exp_neg_square(coef: float, tensor: torch.Tensor) -> torch.Tensor:
-    return torch.sum(torch.exp(-coef * (torch.pow(tensor, 2))), 1) / tensor.shape[1]
+#@torch.jit.script
+def compute_contact_reward():
+    pass
+
+#@torch.jit.script
+def compute_regularization_reward():
+    pass
