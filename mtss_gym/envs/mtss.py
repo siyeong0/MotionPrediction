@@ -111,6 +111,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
         self.fall_down_buf = torch.logical_or(torch.abs(self.root_pos[:,2] - self.motion_state.root_pos[:,2]) > 0.4, torch.abs(self.link_pos[:,2,2] - self.motion_state.link_pos[:,2,2]) > 0.4)
         self.reset_buf = torch.logical_or(torch.logical_or(self.time_out_buf, self.motion_end_buf), self.fall_down_buf)
+        
+        self.rew_buf -= self.fall_down_buf.float() * 10.
 
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
@@ -156,8 +158,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
         if "imitation" in self.cfg.reward.functions:
             self.rew_buf += coef.w_i \
             * compute_imitation_reward(self.obs_buf, self.motion_state.root_state, self.motion_state.dof_state, self.motion_state.link_state,
-                                       coef.imitation.w_p, coef.imitation.w_pv, coef.imitation.w_q, coef.imitation.w_qv, coef.imitation.w_r,
-                                       coef.imitation.k_p, coef.imitation.k_pv, coef.imitation.k_q, coef.imitation.k_qv, coef.imitation.k_r)
+                                       to_torch(coef.imitation.w_p), to_torch(coef.imitation.w_pv), to_torch(coef.imitation.w_q), to_torch(coef.imitation.w_qv), to_torch(coef.imitation.w_r),
+                                       to_torch(coef.imitation.k_p), to_torch(coef.imitation.k_pv), to_torch(coef.imitation.k_q), to_torch(coef.imitation.k_qv), to_torch(coef.imitation.k_r))
         if "contact" in self.cfg.reward.functions:
             pass
             # self.rew_buf += coef.w_c * compute_contact_reward()
@@ -301,9 +303,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
             
     def _init_env_state(self, env_ids):
         self.root_state[env_ids, :] = 0.0
-        self.root_state[env_ids, 0:2] = self.motion_state.root_state[env_ids, 0:2]
+        #self.root_state[env_ids, 0:2] = self.motion_state.root_state[env_ids, 0:2]
         self.root_state[env_ids, 2:3] = 0.89
-        self.root_state[env_ids, 3:7] = self.motion_state.root_state[env_ids, 3:7]
+        #self.root_state[env_ids, 3:7] = self.motion_state.root_state[env_ids, 3:7]
+        self.root_state[env_ids, 6:7] = 1.0
         self.dof_state[env_ids, :, :] = 0
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
