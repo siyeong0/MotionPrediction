@@ -4,8 +4,9 @@ from .base_cfg import BaseConfig
 class MtssCfg(BaseConfig):
     class env:
         num_envs = 1024
-        num_observations = 416
-        num_stack = 6
+        num_observations = 356
+        num_future_frame = 1
+        time_stride = 1.0
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
         env_spacing = 3.  # not used with heightfields/trimeshes 

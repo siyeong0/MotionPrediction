@@ -5,11 +5,11 @@ from mtss_gym.utils.motion_lib import MotionLib
 from mtss_gym.utils.motion_state import MotionState
 
 class Motion:
-    def __init__(self, files, num_envs, dt, min_num_frames, num_dofs, num_bodies, device):
+    def __init__(self, files, num_envs, dt, min_length_sec, num_dofs, num_bodies, device):
         self.num_envs = num_envs
         self.num_motions = len(files)
         self.dt = dt
-        self.min_num_frames = min_num_frames
+        self.min_length_sec = min_length_sec
         self.device = device
         self.num_dofs = num_dofs
         self.num_bodies = num_bodies
@@ -19,9 +19,6 @@ class Motion:
         
         self._motion_state_tensors = []
         self._load(files)
-        
-        state = torch.zeros(num_envs, 13+2*num_dofs+10*num_bodies, device=device, dtype=torch.float32)
-        self.motion_state = MotionState(state, self.num_dofs, self.num_bodies)
         
     def _load(self, files):
         motion_lengths = []
@@ -35,7 +32,7 @@ class Motion:
             num_frames = int(motion_lib.get_motion_length(0) / self.dt)
             motion_lengths.append(num_frames)
             # drop short data
-            if self.min_num_frames > num_frames:
+            if self.min_length_sec / self.dt > num_frames:
                 print("{:s} was droped; Length is under {:3f}s.".format(file, self.dt * num_frames))
                 self.num_motions -= 1
                 continue
@@ -65,14 +62,17 @@ class Motion:
         self._motion_idxs[env_ids] = torch.randint(0, self.num_motions, (len(env_ids),), device=self.device)
         self._motion_offsets[env_ids] = torch.zeros(env_ids.shape[0], device=self.device, dtype=torch.long)
             
-    def step_motion_state(self, env_ids):
-        self.get_motion_state(env_ids)
-        self._motion_offsets[env_ids] += 1
-        done = self._motion_offsets[env_ids] >= self._motion_lengths[self._motion_idxs[env_ids]]
+    def step_motion_state(self):
+        self._motion_offsets += 1
+        done = self._motion_offsets + int(self.min_length_sec / self.dt) >= self._motion_lengths[self._motion_idxs]
         
         return done
     
-    def get_motion_state(self, env_ids):
-        for env_id in env_ids:
+    def get_motion_state(self, time_offset=0.0):
+        frame_offset = int(time_offset / self.dt)
+        state = torch.zeros(self.num_envs, 13+2*self.num_dofs+10*self.num_bodies, device=self.device, dtype=torch.float32)
+        for env_id in torch.arange(0, self.num_envs, device=self.device, dtype=torch.long):
             motion_idx = self._motion_idxs[env_id]
-            self.motion_state.state[env_id] = self._motion_state_tensors[motion_idx][self._motion_offsets[env_id]]
+            state[env_id] = self._motion_state_tensors[motion_idx][self._motion_offsets[env_id] + frame_offset]
+        
+        return MotionState(state, self.num_dofs, self.num_bodies)

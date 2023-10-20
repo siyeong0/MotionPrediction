@@ -5,6 +5,7 @@ from isaacgym import gymapi
 
 if __name__ == "__main__":
     cfg = MtssCfg()
+    cfg.env.num_envs = 2
     env = MotionTrackingFromSparseSensor(cfg, gymapi.SIM_PHYSX, "cuda:0", False)
     env.reset()
     
