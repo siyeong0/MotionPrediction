@@ -64,7 +64,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
 
         self.pre_physics_step()
         self.gym.simulate(self.sim)
-        self.render()
+        if not self.headless:
+            self.render()
         self.post_physics_step()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
@@ -432,7 +433,6 @@ def compute_imitation_reward(obs_buf, motion_root_state, motion_dof_state, motio
         + w_q * r_im_link_pos \
         + w_qv * r_im_link_vel \
         #+ w_r * r_im_link_ori
-    print(r_im)
     return r_im
 
 @torch.jit.script
