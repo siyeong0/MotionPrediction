@@ -109,7 +109,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
 
     def check_termination(self):
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
-        self.fall_down_buf = torch.abs(self.root_pos[:,2] - self.motion_state.root_pos[:,2]) > 0.4
+        self.fall_down_buf = torch.logical_or(torch.abs(self.root_pos[:,2] - self.motion_state.root_pos[:,2]) > 0.4, torch.abs(self.link_pos[:,2,2] - self.motion_state.link_pos[:,2,2]) > 0.4)
         self.reset_buf = torch.logical_or(torch.logical_or(self.time_out_buf, self.motion_end_buf), self.fall_down_buf)
 
     def reset_idx(self, env_ids):
@@ -135,7 +135,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
     
     def compute_observations(self):
         # simulated character observation 
-        obs_sim = compute_sim_observation(self.root_states, self.dof_pos, self.dof_vel, self.glob_body_pos, self.glob_body_quat, self.glob_body_vel, self.glob_body_ang_vel, self.contact_force)
+        obs_sim = compute_sim_observation(self.root_state, self.dof_pos, self.dof_vel, self.link_pos, self.link_quat, self.link_vel, self.link_ang_vel, self.contact_force)
         # user sensor position observation
         self.sensor_obs_hist[:, 1:self.num_stack] = self.sensor_obs_hist[:, 0:self.num_stack-1] # assert num_stack > 1
         self.sensor_obs_hist[:, 0,:] = compute_user_observation(self.motion_state.root_state, 
@@ -192,19 +192,19 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
         # create some wrapper tensors for different slices
-        self.root_states = gymtorch.wrap_tensor(actor_root_state)
-        self.root_pos = self.root_states[:, 0:3]
-        self.root_quat = self.root_states[:, 3:7]
-        self.root_vel = self.root_states[:, 7:10]
-        self.root_ang_vel = self.root_states[:, 10:13]
+        self.root_state = gymtorch.wrap_tensor(actor_root_state)
+        self.root_pos = self.root_state[:, 0:3]
+        self.root_quat = self.root_state[:, 3:7]
+        self.root_vel = self.root_state[:, 7:10]
+        self.root_ang_vel = self.root_state[:, 10:13]
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor).view(self.num_envs, self.num_dofs, 2)
         self.dof_pos = self.dof_state[..., 0]
         self.dof_vel = self.dof_state[..., 1]
         self.body_state = gymtorch.wrap_tensor(body_state_tensor)
-        self.glob_body_pos = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,0:3]
-        self.glob_body_quat = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,3:7]
-        self.glob_body_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,7:10]
-        self.glob_body_ang_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,10:13]
+        self.link_pos = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,0:3]
+        self.link_quat = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,3:7]
+        self.link_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,7:10]
+        self.link_ang_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,10:13]
         self.contact_force = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
         self.motor_efforts = to_torch(self.motor_efforts, device=self.device)
         
@@ -300,24 +300,24 @@ class MotionTrackingFromSparseSensor(BaseTask):
             self.force_sensor_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], force_sensor_names[i])
             
     def _init_env_state(self, env_ids):
-        self.root_states[env_ids, :] = 0.0
-        self.root_states[env_ids, 0:2] = self.motion_state.root_state[env_ids, 0:2]
-        self.root_states[env_ids, 2:3] = 0.89
-        self.root_states[env_ids, 3:7] = self.motion_state.root_state[env_ids, 3:7]
+        self.root_state[env_ids, :] = 0.0
+        self.root_state[env_ids, 0:2] = self.motion_state.root_state[env_ids, 0:2]
+        self.root_state[env_ids, 2:3] = 0.89
+        self.root_state[env_ids, 3:7] = self.motion_state.root_state[env_ids, 3:7]
         self.dof_state[env_ids, :, :] = 0
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states), 
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
             
     def _set_env_state(self, env_ids):
-        self.root_states[env_ids, :] = self.motion_state.root_state[env_ids,:]
+        self.root_state[env_ids, :] = self.motion_state.root_state[env_ids,:]
         self.dof_state[env_ids, :, :] = self.motion_state.dof_state[env_ids,:,:]
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states), 
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         self.gym.set_dof_position_target_tensor_indexed(self.sim, gymtorch.unwrap_tensor(torch.clone(self.dof_pos)),
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
@@ -385,7 +385,7 @@ def compute_user_observation(root_state, link_pos, link_quat, sensor_indices):
     ac_key_ori = torch.flatten(quat_to_nn_rep(quat_mul(c_key_quat, c_inv_base_quat_ori)).view(num_envs, -1), 1) # quat_mul(target, transform)
     return torch.cat((ac_key_pos, ac_key_ori), dim=1)
 
-#@torch.jit.script
+@torch.jit.script
 def compute_imitation_reward(obs_buf, motion_root_state, motion_dof_state, motion_link_state, 
                              w_p, w_pv, w_q, w_qv, w_r, k_p, k_pv, k_q, k_qv, k_r):
     num_envs = obs_buf.shape[0]
