@@ -164,8 +164,9 @@ class MotionTrackingFromSparseSensor(BaseTask):
             pass
             # self.rew_buf += coef.w_c * compute_contact_reward()
         if "regularization" in self.cfg.reward.functions:
-            pass
-            # self.rew_buf += coef.w_r * compute_regularization_reward()
+            self.rew_buf += coef.w_r * compute_regularization_reward(self.actions, self.prev_actions,
+                                                                     to_torch(coef.regularization.w_a), to_torch(coef.regularization.w_s),
+                                                                     to_torch(coef.regularization.k_a), to_torch(coef.regularization.k_s))
 
     def create_sim(self):
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
@@ -441,5 +442,12 @@ def compute_contact_reward():
     pass
 
 @torch.jit.script
-def compute_regularization_reward():
-    pass
+def compute_regularization_reward(actions, prev_actions, w_a, w_s, k_a, k_s):
+    num_envs = actions.shape[0]
+    
+    r_reg_a = torch.mean(exp_neg_norm_square(k_a, actions).view(num_envs, -1), 1)
+    r_reg_s = torch.mean(exp_neg_norm_square(k_s, (actions-prev_actions)).view(num_envs, -1), 1)
+    
+    r_reg = w_a * r_reg_a \
+        + w_s * r_reg_s
+    return r_reg

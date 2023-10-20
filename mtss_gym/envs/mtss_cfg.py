@@ -3,7 +3,7 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 4096
+        num_envs = 1024
         num_observations = 416
         num_stack = 6
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
@@ -59,13 +59,13 @@ class MtssCfg(BaseConfig):
                 k_r = 0.01
             class contact:
                 w_c = 0.5
-                q_c = 0.5
+                k_c = 0.5
             class regularization:
                 w_a = 0.5
                 w_s = 0.5
                 
-                q_a = 1.0
-                q_s = 1.0
+                k_a = 1.0
+                k_s = 1.0
             
     class normalization:
         clip_observations = 100.
@@ -127,7 +127,7 @@ class MtssPPOCfg(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 8 # per iteration
+        num_steps_per_env = 64 # per iteration
         max_iterations = 10000 # number of policy updates
 
         # logging
