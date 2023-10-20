@@ -20,7 +20,8 @@ class Motion:
         self._motion_state_tensors = []
         self._load(files)
         
-        self.state = torch.zeros(num_envs, 13+2*num_dofs+10*num_bodies, device=device, dtype=torch.float32)
+        state = torch.zeros(num_envs, 13+2*num_dofs+10*num_bodies, device=device, dtype=torch.float32)
+        self.motion_state = MotionState(state, self.num_dofs, self.num_bodies)
         
     def _load(self, files):
         motion_lengths = []
@@ -65,16 +66,13 @@ class Motion:
         self._motion_offsets[env_ids] = torch.zeros(env_ids.shape[0], device=self.device, dtype=torch.long)
             
     def step_motion_state(self, env_ids):
-        state = self.get_motion_state(env_ids)
+        self.get_motion_state(env_ids)
         self._motion_offsets[env_ids] += 1
         done = self._motion_offsets[env_ids] >= self._motion_lengths[self._motion_idxs[env_ids]]
         
-        return state, done
+        return done
     
     def get_motion_state(self, env_ids):
-
         for env_id in env_ids:
             motion_idx = self._motion_idxs[env_id]
-            self.state[env_id] = self._motion_state_tensors[motion_idx][self._motion_offsets[env_id]]
-            
-        return MotionState(self.state[env_ids], self.num_dofs, self.num_bodies)
+            self.motion_state.state[env_id] = self._motion_state_tensors[motion_idx][self._motion_offsets[env_id]]
