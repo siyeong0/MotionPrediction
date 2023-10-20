@@ -1,8 +1,8 @@
 from isaacgym import gymapi
 
-from mtss_gym.utils.helpers import class_to_dict, get_log_dir
-
 from rsl_rl.runners import OnPolicyRunner
+
+from mtss_gym.utils.helpers import class_to_dict, get_log_dir
 
 from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
 from mtss_gym.envs.mtss_cfg import MtssCfg, MtssPPOCfg
