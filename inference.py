@@ -7,7 +7,7 @@ from mtss_gym.utils.helpers import class_to_dict, get_log_dir
 from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
 from mtss_gym.envs.mtss_cfg import MtssCfg, MtssPPOCfg
 
-path = "model_1000.pt"
+path = "model_2750.pt"
 
 if __name__ == "__main__":
     # load environment
