@@ -3,8 +3,8 @@ import os
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat, my_quat_rotate, calc_heading_quat_inv
-from mtss_gym.utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep
+from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat_inv, quaternion_to_matrix
+from mtss_gym.utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep, rot_mat_to_vec
 from mtss_gym.utils.motion import Motion
 from mtss_gym.envs.base_task import BaseTask
 from mtss_gym.envs.mtss_cfg import MtssCfg
@@ -48,6 +48,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         # initialize class buffers
         self._load_motions()
         self._init_buffers()
+        self._normalize_coefs()
         
     def play(self):
         while True:
@@ -168,7 +169,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
         if "imitation" in self.cfg.reward.functions:
             motion_state = self.motion.get_motion_state()
             self.rew_buf += coef.w_i \
-            * compute_imitation_reward(self.obs_buf, motion_state.root_state, motion_state.dof_state, motion_state.link_state,
+            * compute_imitation_reward(self.root_state, self.dof_state, self.link_state,
+                                       motion_state.root_state, motion_state.dof_state, motion_state.link_state,
                                        to_torch(coef.imitation.w_p), to_torch(coef.imitation.w_pv), to_torch(coef.imitation.w_q), to_torch(coef.imitation.w_qv), to_torch(coef.imitation.w_r),
                                        to_torch(coef.imitation.k_p), to_torch(coef.imitation.k_pv), to_torch(coef.imitation.k_q), to_torch(coef.imitation.k_qv), to_torch(coef.imitation.k_r))
         if "contact" in self.cfg.reward.functions:
@@ -216,10 +218,11 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.dof_pos = self.dof_state[..., 0]
         self.dof_vel = self.dof_state[..., 1]
         self.body_state = gymtorch.wrap_tensor(body_state_tensor)
-        self.link_pos = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,0:3]
-        self.link_quat = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,3:7]
-        self.link_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,7:10]
-        self.link_ang_vel = self.body_state.view(self.num_envs, self.num_bodies, 13)[...,10:13]
+        self.link_state = self.body_state.view(self.num_envs, self.num_bodies, 13)
+        self.link_pos = self.link_state[...,0:3]
+        self.link_quat = self.link_state[...,3:7]
+        self.link_vel = self.link_state[...,7:10]
+        self.link_ang_vel = self.link_state[...,10:13]
         self.contact_force = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
         self.motor_efforts = to_torch(self.motor_efforts, device=self.device)
         
@@ -249,6 +252,30 @@ class MotionTrackingFromSparseSensor(BaseTask):
                              self.num_future_frame * self.time_stride,
                              self.num_dofs, self.num_bodies,
                              self.device)
+    
+    def _normalize_coefs(self):
+        coef = self.cfg.reward.coef
+        sum = coef.w_i + coef.w_c + coef.w_r
+        coef.w_i /= sum
+        coef.w_c /= sum
+        coef.w_r /= sum
+        
+        coef = self.cfg.reward.coef.imitation
+        sum = coef.w_q + coef.w_qv + coef.w_p + coef.w_pv + coef.w_r
+        coef.w_q /= sum
+        coef.w_qv /= sum
+        coef.w_p /= sum
+        coef.w_pv /= sum
+        coef.w_r /= sum
+        
+        coef = self.cfg.reward.coef.contact
+        sum = coef.w_c
+        coef.w_c /= sum
+        
+        coef = self.cfg.reward.coef.regularization
+        sum = coef.w_a + coef.w_s
+        coef.w_a /= sum
+        coef.w_s /= sum
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -398,46 +425,56 @@ def compute_user_observation(root_state, link_pos, link_quat, sensor_indices):
     return torch.cat((ac_key_pos, ac_key_ori), dim=1)
 
 @torch.jit.script
-def compute_imitation_reward(obs_buf, motion_root_state, motion_dof_state, motion_link_state, 
+def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_root_state, ref_dof_state, ref_link_state, 
                              w_p, w_pv, w_q, w_qv, w_r, k_p, k_pv, k_q, k_qv, k_r):
-    num_envs = obs_buf.shape[0]
-    num_dofs = motion_dof_state.shape[1]
-    num_links = motion_link_state.shape[1]
+    num_envs = sim_root_state.shape[0]
+    num_dofs = sim_dof_state.shape[1]
+    num_links = sim_link_state.shape[1]
     # base_pos is pos that projects the pervis pos on ground
-    base_pos = torch.clone(motion_root_state[:, 0:3])
-    base_pos[:,2] = 0
+    sim_base_pos = torch.clone(sim_root_state[:, 0:3])
+    sim_base_pos[:,2] = 0
+    ref_base_pos = torch.clone(ref_root_state[:, 0:3])
+    ref_base_pos[:,2] = 0
     # base_quat is quaternion represents avatar's heading; yaw
-    inv_base_quat = calc_heading_quat_inv(motion_root_state[:,3:7])
+    sim_inv_base_quat = calc_heading_quat_inv(sim_root_state[:,3:7])
+    ref_inv_base_quat = calc_heading_quat_inv(ref_root_state[:,3:7])
     # preproces inputs. prefix c means variable for calculating
-    c_base_pos = base_pos.unsqueeze(1).repeat(1, motion_link_state.shape[1], 1).view(-1, 3)    # (1, num_links, 1)
-    c_inv_base_quat = inv_base_quat.unsqueeze(1).repeat(1, motion_link_state.shape[1], 1).view(-1, 4)
-    dof_pos = motion_dof_state[:,:,0:1]
-    dof_vel = motion_dof_state[:,:,1:2]
-    c_link_pos = motion_link_state[:,:,0:3].view(-1,3)
-    c_link_quat = motion_link_state[:,:,6:10].view(-1,4)
-    c_link_vel = motion_link_state[:,:,3:6].view(-1,3)
-    
-    # reference motions
-    ref_dof_pos          = dof_pos # not affected
-    ref_dof_vel          = dof_vel # not affected
-    #ref_link_pos         = quat_rotate(c_inv_base_quat, (c_link_pos - c_base_pos)).view(num_envs, num_links, 3)
-    ref_link_pos         = quat_rotate(c_inv_base_quat, (c_link_pos-c_base_pos)).view(num_envs, num_links, 3)
-    ref_link_ori         = quat_to_nn_rep(quat_mul(c_link_quat, c_inv_base_quat)).view(num_envs, num_links, 6) # quat_mul(target, transform)
-    ref_link_vel         = quat_rotate(c_inv_base_quat, c_link_vel).view(num_envs, num_links, 3)
+    sim_c_base_pos = sim_base_pos.unsqueeze(1).repeat(1, num_links, 1).view(-1, 3)    # (1, num_links, 1)
+    sim_c_inv_base_quat = ref_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
+    sim_dof_pos = sim_dof_state[:,:,0:1]
+    sim_dof_vel = sim_dof_state[:,:,1:2]
+    sim_c_link_pos = sim_link_state[:,:,0:3].view(-1,3)
+    sim_c_link_quat = sim_link_state[:,:,3:7].view(-1,4)
+    sim_c_link_vel = sim_link_state[:,:,7:10].view(-1,3)
+    ref_c_base_pos = ref_base_pos.unsqueeze(1).repeat(1, num_links, 1).view(-1, 3)    # (1, num_links, 1)
+    ref_c_inv_base_quat = ref_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
+    ref_dof_pos = ref_dof_state[:,:,0:1]
+    ref_dof_vel = ref_dof_state[:,:,1:2]
+    ref_c_link_pos = ref_link_state[:,:,0:3].view(-1,3)
+    ref_c_link_quat = ref_link_state[:,:,6:10].view(-1,4)
+    ref_c_link_vel = ref_link_state[:,:,3:6].view(-1,3)
+
     # simulation motions
-    sim_dof_pos     = obs_buf[:, 0:num_dofs].view(num_envs, num_dofs, 1)                ; offset = num_dofs
-    sim_dof_vel     = obs_buf[:, offset:offset+num_dofs].view(num_envs, num_dofs, 1)    ; offset += num_dofs
-    sim_link_pos    = obs_buf[:, offset:offset+num_links*3].view(num_envs, num_links, 3); offset += num_links*3
-    sim_link_ori    = obs_buf[:, offset:offset+num_links*6].view(num_envs, num_links, 6); offset += num_links*6
-    sim_link_vel    = obs_buf[:, offset:offset+num_links*3].view(num_envs, num_links, 3)
+    sim_dof_pos          = sim_dof_pos # not affected
+    sim_dof_vel          = sim_dof_vel # not affected
+    sim_link_pos         = quat_rotate(sim_c_inv_base_quat, (sim_c_link_pos-sim_c_base_pos)).view(num_envs, num_links, 3)
+    sim_link_vel         = quat_rotate(sim_c_inv_base_quat, sim_c_link_vel).view(num_envs, num_links, 3)
+    sim_link_mat_inv     = torch.transpose(quaternion_to_matrix(quat_mul(sim_c_link_quat, sim_c_inv_base_quat)), 1, 2) # quat_mul(target, transform)
+
+    # reference motions
+    ref_dof_pos          = ref_dof_pos # not affected
+    ref_dof_vel          = ref_dof_vel # not affected
+    ref_link_pos         = quat_rotate(ref_c_inv_base_quat, (ref_c_link_pos-ref_c_base_pos)).view(num_envs, num_links, 3)
+    ref_link_vel         = quat_rotate(ref_c_inv_base_quat, ref_c_link_vel).view(num_envs, num_links, 3)
+    ref_link_mat         = quaternion_to_matrix(quat_mul(ref_c_link_quat, ref_c_inv_base_quat)) # quat_mul(target, transform)
     
     # compute
     r_im_dof_pos    = torch.mean(exp_neg_norm_square(k_p, (sim_dof_pos-ref_dof_pos)).view(num_envs, -1), 1)
     r_im_dof_vel    = torch.mean(exp_neg_norm_square(k_pv, (sim_dof_vel-ref_dof_vel)).view(num_envs, -1), 1)
     r_im_link_pos   = torch.mean(exp_neg_norm_square(k_q, (sim_link_pos-ref_link_pos)).view(num_envs, -1), 1)
     r_im_link_vel   = torch.mean(exp_neg_norm_square(k_qv, (sim_link_vel-ref_link_vel)).view(num_envs, -1), 1)
-    r_im_link_ori   = torch.mean(exp_neg_norm_square(k_r, (sim_link_ori-ref_link_ori)).view(num_envs, -1), 1)
-    
+    r_im_link_ori   = torch.mean(exp_neg_norm_square(k_r, rot_mat_to_vec(sim_link_mat_inv @ ref_link_mat)).view(num_envs, -1), 1)
+
     r_im = w_p * r_im_dof_pos \
         + w_pv * r_im_dof_vel \
         + w_q * r_im_link_pos \

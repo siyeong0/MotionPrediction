@@ -43,24 +43,26 @@ class MtssCfg(BaseConfig):
         
     class reward:
         functions = ["imitation", "contact", "regularization"]
+        # weights will be normalized
         class coef:
             w_i = 0.9
             w_c = 0.0
             w_r = 0.1
             class imitation:
-                w_q = 0.4
-                w_qv = 0.1
-                w_p = 0.2
-                w_pv = 0.1
-                w_r = 0.2
+                w_q = 0.55
+                w_qv = 0.05
+                w_p = 0.4
+                w_pv = 0.05
+                w_r = 0.1
                 
                 k_q = 40.0
                 k_qv = 0.3
                 k_p = 6.0
                 k_pv = 2.0
-                k_r = 0.01
+                k_r = 3.0
             class contact:
-                w_c = 0.5
+                w_c = 1.0
+                
                 k_c = 0.5
             class regularization:
                 w_a = 0.5
