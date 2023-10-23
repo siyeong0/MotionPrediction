@@ -7,12 +7,12 @@ from mtss_gym.utils.helpers import class_to_dict, get_log_dir
 from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
 from mtss_gym.envs.mtss_cfg import MtssCfg, MtssPPOCfg
 
-path = "model_2750.pt"
+path = "model_950.pt"
 
 if __name__ == "__main__":
     # load environment
     env_cfg = MtssCfg()
-    env_cfg.env.num_envs = 2
+    env_cfg.env.num_envs = 1
     env = MotionTrackingFromSparseSensor(env_cfg, gymapi.SIM_PHYSX, "cuda", False)
     # load model
     rl_cfg = MtssPPOCfg()
