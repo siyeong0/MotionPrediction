@@ -34,13 +34,13 @@ class MotionState:
     
     @property
     def link_state(self):
-        return torch.cat((self.link_pos, self.link_vel, self.link_rot), dim=-1)
+        return torch.cat((self.link_pos, self.link_rot, self.link_vel), dim=-1)
     @property
     def link_pos(self):
         return self.state[:, 13+2*self.num_dofs:13+2*self.num_dofs+3*self.num_bodies].view(self.state.shape[0], self.num_bodies, 3)
     @property
-    def link_vel(self):
-        return self.state[:, 13+2*self.num_dofs+3*self.num_bodies:13+2*self.num_dofs+6*self.num_bodies].view(self.state.shape[0], self.num_bodies, 3)
-    @property
     def link_rot(self):
-        return self.state[:, 13+2*self.num_dofs+6*self.num_bodies:13+2*self.num_dofs+10*self.num_bodies].view(self.state.shape[0], self.num_bodies, 4)
+        return self.state[:, 13+2*self.num_dofs+3*self.num_bodies:13+2*self.num_dofs+7*self.num_bodies].view(self.state.shape[0], self.num_bodies, 4)
+    @property
+    def link_vel(self):
+        return self.state[:, 13+2*self.num_dofs+7*self.num_bodies:13+2*self.num_dofs+10*self.num_bodies].view(self.state.shape[0], self.num_bodies, 3)

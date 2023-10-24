@@ -451,8 +451,8 @@ def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_
     ref_dof_pos = ref_dof_state[:,:,0:1]
     ref_dof_vel = ref_dof_state[:,:,1:2]
     ref_c_link_pos = ref_link_state[:,:,0:3].view(-1,3)
-    ref_c_link_quat = ref_link_state[:,:,6:10].view(-1,4)
-    ref_c_link_vel = ref_link_state[:,:,3:6].view(-1,3)
+    ref_c_link_quat = ref_link_state[:,:,3:7].view(-1,4)
+    ref_c_link_vel = ref_link_state[:,:,7:10].view(-1,3)
 
     # simulation motions
     sim_dof_pos          = sim_dof_pos # not affected

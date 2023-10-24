@@ -48,7 +48,7 @@ class Motion:
                 key_pos[:,:,2] -= 0.05
                 motion_state_buffer.append(torch.cat((root_pos[0], root_rot[0], root_vel[0], root_ang_vel[0],
                                                       torch.flatten(torch.cat((dof_pos[0].unsqueeze(1), dof_vel[0].unsqueeze(1)), dim=1)), 
-                                                      torch.flatten(key_pos[0]), torch.flatten(key_vel[0]), torch.flatten(key_rot[0])), dim=0))
+                                                      torch.flatten(key_pos[0]), torch.flatten(key_rot[0]), torch.flatten(key_vel[0]),), dim=0))
             self._motion_state_tensors.append(torch.stack(motion_state_buffer, dim=0))
             motion_lengths.append(num_frames)
             # print progress
