@@ -99,7 +99,7 @@
 
         <body name="right_shin" pos="0 0 -0.421546">
           <site name="right_knee" class="force-torque" pos="0 0 0"/>
-          <joint name="right_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="200" damping="30" armature=".02"/>
+          <joint name="right_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="300" damping="30" armature=".02"/>
           <geom name="right_shin" fromto="0 0 -0.045 0 0 -0.355"  size=".05" density="1014"/>
           <site name="right_shin" class="touch" pos="0 0 -0.2" size="0.051 0.156" zaxis="0 0 -1"/>
 
@@ -124,7 +124,7 @@
 
         <body name="left_shin" pos="0 0 -0.421546">
           <site name="left_knee" class="force-torque" pos="0 0 .02"/>
-          <joint name="left_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="200" damping="30" armature=".02"/>
+          <joint name="left_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="300" damping="30" armature=".02"/>
           <geom name="left_shin" fromto="0 0 -0.045 0 0 -0.355"  size=".05" density="1014"/>
           <site name="left_shin" class="touch" pos="0 0 -0.2" size="0.051 0.156" zaxis="0 0 -1"/>
 
@@ -195,6 +195,7 @@
     <touch name="pelvis_touch"           site="pelvis"/>
     <touch name="upper_waist_touch"      site="upper_waist"/>
     <touch name="torso_touch"            site="torso"/>
+    <touch name="neck_touch"             site="neck"/>
     <touch name="head_touch"             site="head"/>
     <touch name="right_upper_arm_touch"  site="right_upper_arm"/>
     <touch name="right_lower_arm_touch"  site="right_lower_arm"/>
