@@ -345,6 +345,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.root_state[env_ids, :] = torch.clone(self.init_root_state[env_ids, :])
         self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
         
+        self.root_state[env_ids, 0:2] = self.motion.get_motion_state().root_state[env_ids, 0:2]
+        self.root_state[env_ids, 3:7] = self.motion.get_motion_state().root_state[env_ids, 3:7]
+        # self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids,:]
+        
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
@@ -440,7 +444,7 @@ def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_
     ref_inv_base_quat = calc_heading_quat_inv(ref_root_state[:,3:7])
     # preproces inputs. prefix c means variable for calculating
     sim_c_base_pos = sim_base_pos.unsqueeze(1).repeat(1, num_links, 1).view(-1, 3)    # (1, num_links, 1)
-    sim_c_inv_base_quat = ref_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
+    sim_c_inv_base_quat = sim_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
     sim_dof_pos = sim_dof_state[:,:,0:1]
     sim_dof_vel = sim_dof_state[:,:,1:2]
     sim_c_link_pos = sim_link_state[:,:,0:3].view(-1,3)

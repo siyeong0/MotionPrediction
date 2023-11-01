@@ -1,6 +1,7 @@
 import os
 import glob
 from threading import Thread
+import multiprocessing
 
 from cvt import *
 
@@ -11,12 +12,16 @@ if __name__ == "__main__":
     def work(names, start, end):
         for i in range(start, end):
             name = names[i]
-            bvh_to_fbx(f"data/bvh/{name}.bvh", "data/fbx")
-            import_fbx(f"data/fbx/{name}.fbx", "data/npy")
-            retarget(f"data/npy/{name}.npy", "data/ret")
+            bvh_to_fbx(f"data/bvh/{name}.bvh", "data/dummy/fbx")
+            import_fbx(f"data/dummy/fbx/{name}.fbx", "data/dummy/npy")
+            retarget(f"data/dummy/npy/{name}.npy", "data/ret")
         
     num_works = len(names)
-    num_threads = 8
+    num_threads = multiprocessing.cpu_count()
+    print("===========================================")
+    print(f"Number of Threads : {num_threads}")
+    print("===========================================")
+    
     n_works = int(num_works / num_threads)
     r_works = num_works % num_threads
     

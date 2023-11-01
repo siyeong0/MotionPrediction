@@ -24,7 +24,8 @@ if __name__ == "__main__":
     bpy.ops.import_anim.bvh(filepath=src_dir+'/'+name+".bvh", 
                             global_scale=1, 
                             frame_start=1, 
-                            use_fps_scale=True, 
+                            update_scene_fps = True,
+                            use_fps_scale=False, 
                             use_cyclic=False, 
                             rotate_mode='NATIVE', 
                             axis_forward='-Z', axis_up='Y')

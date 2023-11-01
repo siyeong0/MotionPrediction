@@ -34,7 +34,7 @@ from isaacgymenvs.utils.torch_jit_utils import quat_mul, quat_from_angle_axis
 import torch
 import json
 import numpy as np
-
+from copy import deepcopy
 from poselib.core.rotation3d import *
 from poselib.skeleton.skeleton3d import SkeletonTree, SkeletonState, SkeletonMotion
 from poselib.visualization.common import plot_skeleton_state, plot_skeleton_motion_interactive
@@ -50,8 +50,6 @@ Data required for retargeting are stored in a retarget config dictionary as a js
   - rotation: root rotation offset from source to target skeleton (for transforming across different orientation axes), represented as a quaternion in XYZW order.
   - scale: scale offset from source to target skeleton
 """
-
-VISUALIZE = False
 
 def project_joints(motion):
     right_upper_arm_id = motion.skeleton_tree._node_indices["right_upper_arm"]
@@ -213,19 +211,15 @@ def retarget(src, dst, cfg):
     with open(retarget_data_path) as f:
         retarget_data = json.load(f)
 
-    # load and visualize t-pose files
-    source_tpose = SkeletonState.from_file(retarget_data["source_tpose"])
-    if VISUALIZE:
-        plot_skeleton_state(source_tpose)
-
-    target_tpose = SkeletonState.from_file(retarget_data["target_tpose"])
-    if VISUALIZE:
-        plot_skeleton_state(target_tpose)
-
     # load and visualize source motion sequence
     source_motion = SkeletonMotion.from_file(src)
-    if VISUALIZE:
-        plot_skeleton_motion_interactive(source_motion)
+
+    # source t-pose
+    source_tpose = deepcopy(source_motion)
+    source_tpose.tensor =source_tpose.tensor[0]
+     
+    # target t-pose
+    target_tpose = SkeletonState.from_file(retarget_data["target_tpose"])
 
     # parse data from retarget config
     joint_mapping = retarget_data["joint_mapping"]
@@ -278,7 +272,7 @@ def retarget(src, dst, cfg):
     target_motion.to_file(dst)
 
     # visualize retargeted motion
-    # plot_skeleton_motion_interactive(target_motion)
+    #plot_skeleton_motion_interactive(target_motion)
     
     return
 

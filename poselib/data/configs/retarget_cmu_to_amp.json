@@ -1,5 +1,4 @@
 {
-    "source_tpose": "data/tpose/cmu_tpose.npy",
     "target_tpose": "data/tpose/amp_humanoid_tpose.npy",
     "joint_mapping": {
          "Hips": "pelvis",
