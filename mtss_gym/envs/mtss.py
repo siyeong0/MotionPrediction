@@ -3,7 +3,7 @@ import os
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat_inv, quaternion_to_matrix
+from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat, calc_heading_quat_inv, quaternion_to_matrix
 from mtss_gym.utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep, rot_mat_to_vec
 from mtss_gym.utils.motion import Motion
 from mtss_gym.envs.base_task import BaseTask
@@ -346,7 +346,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
         
         self.root_state[env_ids, 0:2] = self.motion.get_motion_state().root_state[env_ids, 0:2]
-        self.root_state[env_ids, 3:7] = self.motion.get_motion_state().root_state[env_ids, 3:7]
+        self.root_state[env_ids, 3:7] = calc_heading_quat(self.motion.get_motion_state().root_state[env_ids, 3:7])
         
         # self.root_state[env_ids, :] = self.motion.get_motion_state().root_state[env_ids, :]
         # self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids, :, :]
