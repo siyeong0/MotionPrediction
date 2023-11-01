@@ -347,7 +347,9 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         self.root_state[env_ids, 0:2] = self.motion.get_motion_state().root_state[env_ids, 0:2]
         self.root_state[env_ids, 3:7] = self.motion.get_motion_state().root_state[env_ids, 3:7]
-        # self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids,:]
+        
+        # self.root_state[env_ids, :] = self.motion.get_motion_state().root_state[env_ids, :]
+        # self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids, :, :]
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 

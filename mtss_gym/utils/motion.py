@@ -10,7 +10,7 @@ class Motion:
         self.num_motions = len(files)
         self.dt = dt
         self.min_future_frame = min_future_time / self.dt
-        self.min_past_frame = min_past_time / self.dt
+        self.min_past_frame = min_past_time / self.dt + 1
         self.min_length_sec = min_past_time + min_future_time
         self.device = device
         self.num_dofs = num_dofs
@@ -33,7 +33,7 @@ class Motion:
             # import to tensor
             num_frames = int(motion_lib.get_motion_length(0) / self.dt)
             # drop short data
-            if self.min_length_sec * 1.1 > num_frames * self.dt:
+            if self.min_length_sec * 1.2 > num_frames * self.dt:
                 print("{:s} was droped; Length is under {:3f}s.".format(file, self.min_length_sec * 2.))
                 self.num_motions -= 1
                 continue
