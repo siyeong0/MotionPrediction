@@ -143,17 +143,17 @@ class MotionTrackingFromSparseSensor(BaseTask):
         # user sensor position observation
         obs_user_buf = []
         curr_motion_state = self.motion.get_motion_state(0.0)
-        obs_user_buf.append(compute_user_observation(curr_motion_state.root_state, 
+        obs_user_buf.append(compute_user_observation(self.root_state,
                                                      curr_motion_state.link_pos, curr_motion_state.link_rot, 
                                                      self.pos_sensor_indices))
         for i in range(self.num_past_frame):
             past_motion_state = self.motion.get_motion_state(-(i+1) * self.time_stride)
-            obs_user_buf.insert(0, compute_user_observation(curr_motion_state.root_state, 
+            obs_user_buf.insert(0, compute_user_observation(self.root_state, 
                                                             past_motion_state.link_pos, past_motion_state.link_rot, 
                                                             self.pos_sensor_indices))
         for i in range(self.num_future_frame):
             future_motion_state = self.motion.get_motion_state((i+1) * self.time_stride)
-            obs_user_buf.append(compute_user_observation(curr_motion_state.root_state, 
+            obs_user_buf.append(compute_user_observation(self.root_state, 
                                                          future_motion_state.link_pos, future_motion_state.link_rot, 
                                                          self.pos_sensor_indices))
         obs_user = torch.cat(obs_user_buf, dim=1)
@@ -439,11 +439,8 @@ def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_
     # base_pos is pos that projects the pervis pos on ground
     sim_base_pos = torch.clone(sim_root_state[:, 0:3])
     sim_base_pos[:,2] = 0
-    ref_base_pos = torch.clone(ref_root_state[:, 0:3])
-    ref_base_pos[:,2] = 0
     # base_quat is quaternion represents avatar's heading; yaw
     sim_inv_base_quat = calc_heading_quat_inv(sim_root_state[:,3:7])
-    ref_inv_base_quat = calc_heading_quat_inv(ref_root_state[:,3:7])
     # preproces inputs. prefix c means variable for calculating
     sim_c_base_pos = sim_base_pos.unsqueeze(1).repeat(1, num_links, 1).view(-1, 3)    # (1, num_links, 1)
     sim_c_inv_base_quat = sim_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
@@ -452,8 +449,6 @@ def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_
     sim_c_link_pos = sim_link_state[:,:,0:3].view(-1,3)
     sim_c_link_quat = sim_link_state[:,:,3:7].view(-1,4)
     sim_c_link_vel = sim_link_state[:,:,7:10].view(-1,3)
-    ref_c_base_pos = ref_base_pos.unsqueeze(1).repeat(1, num_links, 1).view(-1, 3)    # (1, num_links, 1)
-    ref_c_inv_base_quat = ref_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
     ref_dof_pos = ref_dof_state[:,:,0:1]
     ref_dof_vel = ref_dof_state[:,:,1:2]
     ref_c_link_pos = ref_link_state[:,:,0:3].view(-1,3)
@@ -470,9 +465,9 @@ def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_
     # reference motions
     ref_dof_pos          = ref_dof_pos # not affected
     ref_dof_vel          = ref_dof_vel # not affected
-    ref_link_pos         = quat_rotate(ref_c_inv_base_quat, (ref_c_link_pos-ref_c_base_pos)).view(num_envs, num_links, 3)
-    ref_link_vel         = quat_rotate(ref_c_inv_base_quat, ref_c_link_vel).view(num_envs, num_links, 3)
-    ref_link_mat         = quaternion_to_matrix(quat_mul(ref_c_link_quat, ref_c_inv_base_quat)) # quat_mul(target, transform)
+    ref_link_pos         = quat_rotate(sim_c_inv_base_quat, (ref_c_link_pos-sim_c_base_pos)).view(num_envs, num_links, 3)
+    ref_link_vel         = quat_rotate(sim_c_inv_base_quat, ref_c_link_vel).view(num_envs, num_links, 3)
+    ref_link_mat         = quaternion_to_matrix(quat_mul(ref_c_link_quat, sim_c_inv_base_quat)) # quat_mul(target, transform)
     
     # compute
     r_im_dof_pos    = torch.mean(exp_neg_norm_square(k_p, (sim_dof_pos-ref_dof_pos)).view(num_envs, -1), 1)
