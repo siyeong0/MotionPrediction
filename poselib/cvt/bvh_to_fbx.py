@@ -20,15 +20,16 @@ if __name__ == "__main__":
         print(f"{ext} not supported.")
         exit(1)
     
+    bpy.context.scene.render.fps = 120
     # See http://www.blender.org/documentation/blender_python_api_2_60_0/bpy.ops.import_anim.html
     bpy.ops.import_anim.bvh(filepath=src_dir+'/'+name+".bvh", 
                             global_scale=1, 
                             frame_start=1, 
-                            update_scene_fps = True,
                             use_fps_scale=False, 
                             use_cyclic=False, 
                             rotate_mode='NATIVE', 
                             axis_forward='-Z', axis_up='Y')
+    bpy.context.scene.render.fps = 120
     # See http://www.blender.org/documentation/blender_python_api_2_62_1/bpy.ops.export_scene.html
     bpy.ops.export_scene.fbx(filepath=dst_dir+'/'+name+".fbx", 
                              axis_forward='-Z', axis_up='Y')

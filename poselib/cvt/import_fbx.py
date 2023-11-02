@@ -59,7 +59,7 @@ if __name__ == "__main__":
     motion = SkeletonMotion.from_fbx(
         fbx_file_path=src_file,
         root_joint="Hips",
-        fps=120
+        fps=36
     )
     motion.to_file(dst_file)
 
