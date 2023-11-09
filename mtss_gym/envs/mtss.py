@@ -118,7 +118,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.fall_down_buf = torch.logical_or(torch.abs(self.root_pos[:,2] - motion_state.root_pos[:,2]) > 0.5, torch.abs(self.link_pos[:,2,2] - motion_state.link_pos[:,2,2]) > 0.5)
         self.reset_buf = torch.logical_or(torch.logical_or(self.time_out_buf, self.motion_end_buf), self.fall_down_buf)
 
-        self.rew_buf -= self.fall_down_buf.float() * 10.
+        #self.rew_buf -= self.fall_down_buf.float() * 10.
 
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
@@ -280,8 +280,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
         plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
-        plane_params.dynamic_friction = 1.0
-        plane_params.static_friction = 1.0
+        plane_params.dynamic_friction = 40.0
+        plane_params.static_friction = 40.0
         self.gym.add_ground(self.sim, plane_params)
 
     def _create_envs(self):

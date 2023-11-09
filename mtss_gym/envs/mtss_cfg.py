@@ -3,7 +3,7 @@ from .base_cfg import BaseConfig
 
 class MtssCfg(BaseConfig):
     class env:
-        num_envs = 64
+        num_envs = 4096
         num_observations = 431
         num_past_frame = 3
         num_future_frame = 3
@@ -38,22 +38,22 @@ class MtssCfg(BaseConfig):
         force_sensor_body_names = ["left_foot", "right_foot"]
         
     class motion:
-        dir = "resources/test"
+        dir = "resources/ret"
         files = os.listdir(dir)
         
     class reward:
         functions = ["imitation", "contact", "regularization"]
         # weights will be normalized
         class coef:
-            w_i = 0.9
+            w_i = 0.8
             w_c = 0.0
-            w_r = 0.1
+            w_r = 0.2
             class imitation:
                 w_q = 0.55
-                w_qv = 0.05
+                w_qv = 0.01
                 w_p = 0.4
-                w_pv = 0.05
-                w_r = 0.1
+                w_pv = 0.01
+                w_r = 0.2
                 
                 k_q = 40.0
                 k_qv = 0.3
@@ -121,7 +121,7 @@ class MtssPPOCfg(BaseConfig):
         entropy_coef = 0.0
         num_learning_epochs = 5
         num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
-        learning_rate = 1.2e-3
+        learning_rate = 1.2e-4
         schedule = 'adaptive' # could be adaptive, fixed
         gamma = 0.97
         lam = 0.95
@@ -131,11 +131,11 @@ class MtssPPOCfg(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 64 # per iteration
-        max_iterations = 3000 # number of policy updates
+        num_steps_per_env = 8 # per iteration
+        max_iterations = 100000 # number of policy updates
 
         # logging
-        save_interval = 50 # check for potential saves every this many iterations
+        save_interval = 100 # check for potential saves every this many iterations
         experiment_name = 'test'
         run_name = ''
         # load and resume

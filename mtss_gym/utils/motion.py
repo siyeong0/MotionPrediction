@@ -33,8 +33,8 @@ class Motion:
             # import to tensor
             num_frames = int(motion_lib.get_motion_length(0) / self.dt)
             # drop short data
-            if self.min_length_sec * 1.2 > num_frames * self.dt:
-                print("{:s} was droped; Length is under {:3f}s.".format(file, self.min_length_sec * 2.))
+            if self.min_length_sec * 2 > num_frames * self.dt:
+                print("{:s} was droped; Length is under {:3f}s.".format(file, self.min_length_sec * 2))
                 self.num_motions -= 1
                 continue
             # buffers
