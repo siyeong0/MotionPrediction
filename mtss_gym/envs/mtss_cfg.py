@@ -49,16 +49,16 @@ class MtssCfg(BaseConfig):
             w_c = 0.0
             w_r = 0.2
             class imitation:
-                w_q = 0.55
+                w_q = 0.3
                 w_qv = 0.01
-                w_p = 0.4
+                w_p = 0.8
                 w_pv = 0.01
                 w_r = 0.2
                 
                 k_q = 40.0
                 k_qv = 0.3
-                k_p = 6.0
-                k_pv = 2.0
+                k_p = 10.0
+                k_pv = 0.2
                 k_r = 3.0
             class contact:
                 w_c = 1.0
