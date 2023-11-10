@@ -228,7 +228,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         # initialize some data used later on
         self.init_root_state = torch.zeros_like(self.root_state)
-        self.init_root_state[:, 2:3] = 0.89
+        self.init_root_state[:, 2:3] = 0.85
         self.init_root_state[:, 6:7] = 1.0
         self.init_dof_state = torch.zeros_like(self.dof_state)
         
@@ -298,13 +298,13 @@ class MotionTrackingFromSparseSensor(BaseTask):
         asset_options.replace_cylinder_with_capsule = self.cfg.asset.replace_cylinder_with_capsule
         asset_options.flip_visual_attachments = self.cfg.asset.flip_visual_attachments
         
-        # asset_options.density = self.cfg.asset.density
-        # asset_options.angular_damping = self.cfg.asset.angular_damping
-        # asset_options.linear_damping = self.cfg.asset.linear_damping
-        # asset_options.max_angular_velocity = self.cfg.asset.max_angular_velocity
-        # asset_options.max_linear_velocity = self.cfg.asset.max_linear_velocity
-        # asset_options.armature = self.cfg.asset.armature
-        # asset_options.thickness = self.cfg.asset.thickness
+        asset_options.density = self.cfg.asset.density
+        asset_options.angular_damping = self.cfg.asset.angular_damping
+        asset_options.linear_damping = self.cfg.asset.linear_damping
+        asset_options.max_angular_velocity = self.cfg.asset.max_angular_velocity
+        asset_options.max_linear_velocity = self.cfg.asset.max_linear_velocity
+        asset_options.armature = self.cfg.asset.armature
+        asset_options.thickness = self.cfg.asset.thickness
 
         robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         
@@ -325,7 +325,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.actor_handles = []
         self.envs = []
         start_pose = gymapi.Transform()
-        start_pose.p = gymapi.Vec3(0, 0, 0.89)
+        start_pose.p = gymapi.Vec3(0, 0, 0.85)
         start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
         for i in range(self.num_envs):
             # create env instance
@@ -342,14 +342,14 @@ class MotionTrackingFromSparseSensor(BaseTask):
             self.force_sensor_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], force_sensor_names[i])
             
     def _init_env_state(self, env_ids):
-        self.root_state[env_ids, :] = torch.clone(self.init_root_state[env_ids, :])
-        self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
+        # self.root_state[env_ids, :] = torch.clone(self.init_root_state[env_ids, :])
+        # self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
         
-        self.root_state[env_ids, 0:2] = self.motion.get_motion_state().root_state[env_ids, 0:2]
-        self.root_state[env_ids, 3:7] = calc_heading_quat(self.motion.get_motion_state().root_state[env_ids, 3:7])
+        # self.root_state[env_ids, 0:2] = self.motion.get_motion_state().root_state[env_ids, 0:2]
+        # self.root_state[env_ids, 3:7] = calc_heading_quat(self.motion.get_motion_state().root_state[env_ids, 3:7])
         
-        # self.root_state[env_ids, :] = self.motion.get_motion_state().root_state[env_ids, :]
-        # self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids, :, :]
+        self.root_state[env_ids, :] = self.motion.get_motion_state().root_state[env_ids, :]
+        self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids, :, :]
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
@@ -364,10 +364,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        self.gym.set_dof_position_target_tensor_indexed(self.sim, gymtorch.unwrap_tensor(torch.clone(self.dof_pos)),
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        # self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
+        # self.gym.set_dof_position_target_tensor_indexed(self.sim, gymtorch.unwrap_tensor(torch.clone(self.dof_pos)),
         #                                             gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
+                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         
     #------------ helper functions----------------
     def sample_action(self):

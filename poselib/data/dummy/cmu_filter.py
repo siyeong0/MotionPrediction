@@ -13,5 +13,5 @@ while True:
     name = line.split()[0]
     sub_dir = name.split("_")[0]
     
-    shutil.copyfile(f"{src_path}/{sub_dir}/{name}.bvh", f"{dst_path}/{name}.bvh")
+    shutil.copyfile(f"{src_path}/{name}.bvh", f"{dst_path}/{name}.bvh")
 f.close()

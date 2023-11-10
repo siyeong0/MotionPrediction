@@ -24,12 +24,12 @@ class MtssCfg(BaseConfig):
         replace_cylinder_with_capsule = True # replace collision cylinders with capsules, leads to faster/more stable simulation
         flip_visual_attachments = False # Some .obj meshes must be flipped from y-up to z-up
         
-        density = 0.001
+        density = 985
         angular_damping = 0.
         linear_damping = 0.
         max_angular_velocity = 1000.
         max_linear_velocity = 1000.
-        armature = 0.
+        armature = 0.1
         thickness = 0.01
         
         self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
@@ -49,17 +49,17 @@ class MtssCfg(BaseConfig):
             w_c = 0.0
             w_r = 0.2
             class imitation:
-                w_q = 0.3
+                w_q = 0.5
                 w_qv = 0.01
-                w_p = 0.8
+                w_p = 0.5
                 w_pv = 0.01
                 w_r = 0.2
                 
                 k_q = 40.0
-                k_qv = 0.3
+                k_qv = 0.1
                 k_p = 10.0
-                k_pv = 0.2
-                k_r = 3.0
+                k_pv = 0.05
+                k_r = 1.0
             class contact:
                 w_c = 1.0
                 
@@ -104,7 +104,7 @@ class MtssPPOCfg(BaseConfig):
     seed = 1
     runner_class_name = 'OnPolicyRunner'
     class policy:
-        init_noise_std = 1.0
+        init_noise_std = 0.8
         actor_hidden_dims = [300, 200, 100]
         critic_hidden_dims = [400, 400, 300, 200]
         activation = 'tanh' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
@@ -120,9 +120,9 @@ class MtssPPOCfg(BaseConfig):
         clip_param = 0.2
         entropy_coef = 0.0
         num_learning_epochs = 5
-        num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
+        num_mini_batches = 8 # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = 1.2e-4
-        schedule = 'adaptive' # could be adaptive, fixed
+        schedule = 'fixed' # could be adaptive, fixed
         gamma = 0.97
         lam = 0.95
         desired_kl = 0.01
@@ -131,7 +131,7 @@ class MtssPPOCfg(BaseConfig):
     class runner:
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
-        num_steps_per_env = 8 # per iteration
+        num_steps_per_env = 15 # per iteration
         max_iterations = 100000 # number of policy updates
 
         # logging

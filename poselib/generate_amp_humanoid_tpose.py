@@ -59,5 +59,5 @@ translation = zero_pose.root_translation
 translation += torch.tensor([0, 0, 0.9])
 
 # save and visualize T-pose
-zero_pose.to_file("data/amp_humanoid_tpose.npy")
+zero_pose.to_file("data/tpose/amp_humanoid_tpose.npy")
 plot_skeleton_state(zero_pose)
