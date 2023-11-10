@@ -298,13 +298,13 @@ class MotionTrackingFromSparseSensor(BaseTask):
         asset_options.replace_cylinder_with_capsule = self.cfg.asset.replace_cylinder_with_capsule
         asset_options.flip_visual_attachments = self.cfg.asset.flip_visual_attachments
         
-        asset_options.density = self.cfg.asset.density
-        asset_options.angular_damping = self.cfg.asset.angular_damping
-        asset_options.linear_damping = self.cfg.asset.linear_damping
-        asset_options.max_angular_velocity = self.cfg.asset.max_angular_velocity
-        asset_options.max_linear_velocity = self.cfg.asset.max_linear_velocity
-        asset_options.armature = self.cfg.asset.armature
-        asset_options.thickness = self.cfg.asset.thickness
+        # asset_options.density = self.cfg.asset.density
+        # asset_options.angular_damping = self.cfg.asset.angular_damping
+        # asset_options.linear_damping = self.cfg.asset.linear_damping
+        # asset_options.max_angular_velocity = self.cfg.asset.max_angular_velocity
+        # asset_options.max_linear_velocity = self.cfg.asset.max_linear_velocity
+        # asset_options.armature = self.cfg.asset.armature
+        # asset_options.thickness = self.cfg.asset.thickness
 
         robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         
@@ -366,6 +366,8 @@ class MotionTrackingFromSparseSensor(BaseTask):
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         self.gym.set_dof_position_target_tensor_indexed(self.sim, gymtorch.unwrap_tensor(torch.clone(self.dof_pos)),
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        # self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
+        #                                             gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         
     #------------ helper functions----------------
     def sample_action(self):

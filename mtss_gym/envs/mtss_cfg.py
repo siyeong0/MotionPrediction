@@ -32,13 +32,13 @@ class MtssCfg(BaseConfig):
         armature = 0.
         thickness = 0.01
         
-        self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
+        self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
         
         pos_sensor_body_names = ["head", "left_hand", "right_hand"]
         force_sensor_body_names = ["left_foot", "right_foot"]
         
     class motion:
-        dir = "resources/ret"
+        dir = "resources/test"
         files = os.listdir(dir)
         
     class reward:
