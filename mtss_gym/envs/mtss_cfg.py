@@ -38,7 +38,7 @@ class MtssCfg(BaseConfig):
         force_sensor_body_names = ["left_foot", "right_foot"]
         
     class motion:
-        dir = "resources/test"
+        dir = "resources/ret"
         files = os.listdir(dir)
         
     class reward:
@@ -49,27 +49,27 @@ class MtssCfg(BaseConfig):
             w_c = 0.0
             w_r = 0.2
             class imitation:
-                w_q = 0.5
-                w_qv = 0.01
-                w_p = 0.5
-                w_pv = 0.01
-                w_r = 0.2
+                w_q = 0.55
+                w_qv = 0.05
+                w_p = 0.4
+                w_pv = 0.05
+                w_r = 0.1
                 
                 k_q = 40.0
-                k_qv = 0.1
-                k_p = 10.0
-                k_pv = 0.05
-                k_r = 1.0
+                k_qv = 0.3
+                k_p = 6.0
+                k_pv = 2.0
+                k_r = 3.0
             class contact:
                 w_c = 1.0
                 
                 k_c = 0.5
             class regularization:
-                w_a = 0.5
-                w_s = 0.5
+                w_a = 0.4
+                w_s = 0.6
                 
-                k_a = 1.0
-                k_s = 1.0
+                k_a = 0.1
+                k_s = 0.05
             
     class normalization:
         clip_observations = 100.
