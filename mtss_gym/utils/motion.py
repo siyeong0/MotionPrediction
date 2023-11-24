@@ -6,6 +6,9 @@ from mtss_gym.utils.motion_state import MotionState
 
 class Motion:
     def __init__(self, files, num_envs, dt, min_past_time, min_future_time, num_dofs, num_bodies, device):
+        min_past_time = min(min_past_time, dt)
+        min_future_time = min(min_future_time, dt)
+        
         self.num_envs = num_envs
         self.num_motions = len(files)
         self.dt = dt
