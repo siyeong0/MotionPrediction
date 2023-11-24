@@ -5,9 +5,9 @@ class MtssCfg(BaseConfig):
     class env:
         num_envs = 4096
         num_observations = 386
-        num_past_frame = 3
+        num_past_frame = 6
         num_future_frame = 0
-        time_stride = 1.0/3.0
+        time_stride = 1.0/ (num_past_frame + num_future_frame)
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 28
         env_spacing = 3.  # not used with heightfields/trimeshes 
@@ -38,7 +38,7 @@ class MtssCfg(BaseConfig):
         force_sensor_body_names = ["left_foot", "right_foot"]
         
     class motion:
-        dir = "resources/ret"
+        dir = "resources/test"
         files = os.listdir(dir)
         
     class reward:
