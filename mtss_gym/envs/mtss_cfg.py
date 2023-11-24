@@ -4,7 +4,7 @@ from .base_cfg import BaseConfig
 class MtssCfg(BaseConfig):
     class env:
         num_envs = 4096
-        num_observations = 386
+        num_observations = 431
         num_past_frame = 6
         num_future_frame = 0
         time_stride = 1.0/ (num_past_frame + num_future_frame)
