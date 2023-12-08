@@ -19,7 +19,7 @@
 5. Install rsl_rl
     ```bash
     git clone https://github.com/leggedrobotics/rsl_rl.git
-    cd rsl_rl
+    cd rsl_rl && git checkout v1.0.2
     pip install -e .
     ```
 6. Clone this repository
