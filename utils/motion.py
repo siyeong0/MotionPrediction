@@ -1,8 +1,8 @@
 import numpy as np
 import torch
 
-from mtss_gym.utils.motion_lib import MotionLib
-from mtss_gym.utils.motion_state import MotionState
+from utils.motion_lib import MotionLib
+from utils.motion_state import MotionState
 
 class Motion:
     def __init__(self, files, num_envs, dt, min_past_time, min_future_time, num_dofs, num_bodies, device):

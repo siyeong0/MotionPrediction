@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mtss_gym.utils.log import parse_log_file
+from utils.log import parse_log_file
 
 if __name__ == "__main__":
     data = parse_log_file("logs/r0/log.txt")

@@ -4,8 +4,8 @@ import os
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
 from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat, calc_heading_quat_inv, quaternion_to_matrix
-from mtss_gym.utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep, rot_mat_to_vec
-from mtss_gym.utils.motion import Motion
+from utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep, rot_mat_to_vec
+from utils.motion import Motion
 from mtss_gym.envs.base_task import BaseTask
 from mtss_cfg.mtss_cfg import MtssCfg
 
