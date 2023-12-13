@@ -7,7 +7,7 @@ from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_
 from mtss_gym.utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep, rot_mat_to_vec
 from mtss_gym.utils.motion import Motion
 from mtss_gym.envs.base_task import BaseTask
-from mtss_gym.envs.mtss_cfg import MtssCfg
+from mtss_cfg.mtss_cfg import MtssCfg
 
 class MotionTrackingFromSparseSensor(BaseTask):
     def __init__(self, cfg: MtssCfg, physics_engine, sim_device, headless):

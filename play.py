@@ -1,5 +1,5 @@
 from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
-from mtss_gym.envs.mtss_cfg import MtssCfg
+from mtss_cfg.mtss_cfg import MtssCfg
 
 from isaacgym import gymapi
 
