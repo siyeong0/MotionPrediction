@@ -1,4 +1,4 @@
-from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
+from mtss_gym.mtss_gym import MotionTrackingFromSparseSensor
 from mtss_cfg.mtss_cfg import MtssCfg
 
 from isaacgym import gymapi

@@ -1,25 +1,34 @@
 import numpy as np
 import os
 
+from rsl_rl.runners import OnPolicyRunner
+
+from utils.helpers import class_to_dict, get_log_dir
+
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
 from isaacgymenvs.utils.torch_jit_utils import quat_mul, to_torch, calc_heading_quat, calc_heading_quat_inv, quaternion_to_matrix
 from utils.torch_jit_utils import exp_neg_norm_square, quat_to_nn_rep, rot_mat_to_vec
-from utils.motion import Motion
-from mtss_gym.envs.base_task import BaseTask
-from mtss_cfg.mtss_cfg import MtssCfg
+from mtss_sim.base_task import BaseTask
+from mtss_cfg.mtss_cfg import MtssCfg, MtssPPOCfg
 
-class MotionTrackingFromSparseSensor(BaseTask):
-    def __init__(self, cfg: MtssCfg, physics_engine, sim_device, headless):
+class MotionTrackingSim(BaseTask):
+    def __init__(self, 
+                 cfg: MtssCfg, 
+                 max_num_envs: int,
+                 rl_cfg: MtssPPOCfg,
+                 model_path: str,  
+                 physics_engine, 
+                 sim_device, 
+                 headless):
         # parse config
         self.cfg = cfg
+        self.cfg.env.num_envs = max_num_envs
         self.num_past_frame = self.cfg.env.num_past_frame
         self.num_future_frame = self.cfg.env.num_future_frame
         self.num_frames = self.num_past_frame + 1 + self.num_future_frame
         self.time_stride = self.cfg.env.time_stride
-        self.max_episode_length_s = self.cfg.env.max_episode_length_s
         self.dt = cfg.sim.dt
-        self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
         # parse simulation params
         sim_params = gymapi.SimParams()
         sim_params.use_gpu_pipeline = cfg.sim.use_gpu
@@ -46,39 +55,44 @@ class MotionTrackingFromSparseSensor(BaseTask):
             self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
         
         # initialize class buffers
-        self._load_motions()
         self._init_buffers()
         self._normalize_coefs()
         
-    def play(self):
-        while True:
-            # play randomly selected motion
-            env_ids = self._every_env_ids()
-            self._set_env_state(env_ids)
-            # simulate
-            self.gym.simulate(self.sim)
-            self.render()
-            # refresh actor states and steps additional works
-            self.post_physics_step()
+        # load rl model
+        self.rl_cfg = rl_cfg
+        self.rl_cfg.runner.resume = True
+        self.load_model(model_path)
         
-    def step(self, actions):
+    def step(self, hmd_state_stack, left_hand_pos_stack=None, right_hand_pos_stack=None):
+        self.hmd_state_buffer[:] = hmd_state_stack
+        self.hand_state_buffer[:, :, 0, :] = left_hand_pos_stack if left_hand_pos_stack != None else 0
+        self.hand_state_buffer[:, :, 1, :] = right_hand_pos_stack if right_hand_pos_stack != None else 0
+            
+         # compute observation
+        self.compute_observations()
+        clip_obs = self.cfg.normalization.clip_observations
+        self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
+        if self.privileged_obs_buf is not None:
+            self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+        
+        # get policy model output; action
+        obs = self.get_observations()
+        actions = self.policy(obs.detach()).detach()
+        
         clip_actions = self.cfg.normalization.clip_actions
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
 
+        # simulate
         self.pre_physics_step()
         self.gym.simulate(self.sim)
         if not self.headless:
             self.render()
         self.post_physics_step()
-
-        # return clipped obs, clipped states (None), rewards, dones and infos
-        clip_obs = self.cfg.normalization.clip_observations
-        self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
-        if self.privileged_obs_buf is not None:
-            self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
             
         self.prev_actions = self.actions
-        return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
+        
+        # return full body motion
+        return self.root_state, self.dof_state
 
     def pre_physics_step(self):
         forces = self.actions * self.motor_efforts.unsqueeze(0)
@@ -96,43 +110,18 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.gym.refresh_force_sensor_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
-
-        # motion step
-        done = self.motion.step_motion_state()
-        self.motion_end_buf = to_torch(done, dtype=torch.bool, device=self.device)
-
-        # compute reward before to reset and update obs_buf
-        self.compute_reward()
         
         # reset environments
-        self.check_termination()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
-        
-        # compute observation
-        self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
-
-    def check_termination(self):
-        motion_state = self.motion.get_motion_state()
-        self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
-        self.fall_down_buf = torch.logical_or(torch.abs(self.root_pos[:,2] - motion_state.root_pos[:,2]) > 1.0, torch.abs(self.link_pos[:,2,2] - motion_state.link_pos[:,2,2]) > 1.0)
-        self.reset_buf = torch.logical_or(torch.logical_or(self.time_out_buf, self.motion_end_buf), self.fall_down_buf)
-
-        #self.rew_buf -= self.fall_down_buf.float() * 10.
 
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
             return
-        
-        # reset motions
-        self.motion.reset(env_ids)
-        
-        # initialize motion state buffer and set actor root and dof state
-        self._init_env_state(env_ids)
 
         # reset buffers
         self.episode_length_buf[env_ids] = 0
-        self.reset_buf[env_ids] = 1
+        self.reset_buf[env_ids] = 0
     
     def compute_observations(self):
         # simulated character observation 
@@ -142,20 +131,10 @@ class MotionTrackingFromSparseSensor(BaseTask):
         
         # user sensor position observation
         obs_user_buf = []
-        curr_motion_state = self.motion.get_motion_state(0.0)
-        obs_user_buf.append(compute_user_observation(self.root_state,
-                                                     curr_motion_state.link_pos, curr_motion_state.link_rot, 
-                                                     self.pos_sensor_indices))
-        for i in range(self.num_past_frame):
-            past_motion_state = self.motion.get_motion_state(-(i+1) * self.time_stride)
-            obs_user_buf.insert(0, compute_user_observation(self.root_state, 
-                                                            past_motion_state.link_pos, past_motion_state.link_rot, 
-                                                            self.pos_sensor_indices))
-        for i in range(self.num_future_frame):
-            future_motion_state = self.motion.get_motion_state((i+1) * self.time_stride)
-            obs_user_buf.append(compute_user_observation(self.root_state, 
-                                                         future_motion_state.link_pos, future_motion_state.link_rot, 
-                                                         self.pos_sensor_indices))
+        for i in range(1 + self.num_past_frame + self.num_future_frame):
+            obs_user_buf.append(compute_user_observation(self.root_state,
+                                                        self.hmd_state_buffer[i],
+                                                        self.hand_state_buffer[i]))
         obs_user = torch.cat(obs_user_buf, dim=1)
         # height map observation
         # TODO:
@@ -163,34 +142,30 @@ class MotionTrackingFromSparseSensor(BaseTask):
         # concat
         self.obs_buf = torch.cat((obs_sim, obs_user), dim=1)
         
-    def compute_reward(self):
-        coef = self.cfg.reward.coef
-        self.rew_buf[:] = 0.
-        if "imitation" in self.cfg.reward.functions:
-            motion_state = self.motion.get_motion_state()
-            self.rew_buf += coef.w_i \
-            * compute_imitation_reward(self.root_state, self.dof_state, self.link_state,
-                                       motion_state.root_state, motion_state.dof_state, motion_state.link_state,
-                                       to_torch(coef.imitation.w_p), to_torch(coef.imitation.w_pv), to_torch(coef.imitation.w_q), to_torch(coef.imitation.w_qv), to_torch(coef.imitation.w_r),
-                                       to_torch(coef.imitation.k_p), to_torch(coef.imitation.k_pv), to_torch(coef.imitation.k_q), to_torch(coef.imitation.k_qv), to_torch(coef.imitation.k_r))
-        if "contact" in self.cfg.reward.functions:
-            pass
-            # self.rew_buf += coef.w_c * compute_contact_reward()
-        if "regularization" in self.cfg.reward.functions:
-            self.rew_buf += coef.w_r * compute_regularization_reward(self.actions, self.prev_actions,
-                                                                     to_torch(coef.regularization.w_a), to_torch(coef.regularization.w_s),
-                                                                     to_torch(coef.regularization.k_a), to_torch(coef.regularization.k_s))
-
     def create_sim(self):
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         self._create_ground_plane()
         self._create_envs()
+    
+    def init_env_state(self, env_ids, root_state):
+        self.root_state[env_ids, :] = root_state[env_ids]
+        self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
         
+        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
+                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
+                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         
     def set_camera(self, position, lookat):
         cam_pos = gymapi.Vec3(position[0], position[1], position[2])
         cam_target = gymapi.Vec3(lookat[0], lookat[1], lookat[2])
         self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
+
+    def load_model(self, path):
+        ppo_runner = OnPolicyRunner(self, class_to_dict(MtssPPOCfg), get_log_dir("logs", "mtss"), device="cuda")
+        ppo_runner.load(path)
+        self.policy = ppo_runner.get_inference_policy(device=self.device)
 
     #----------------------------------------
     def _init_buffers(self):
@@ -238,20 +213,9 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.actions = torch.zeros(self.num_envs, self.num_actions, device=self.device, dtype=torch.float32)
         self.prev_actions = torch.zeros_like(self.actions)
         
-        self.motion_end_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        self.fall_down_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        
-    def _load_motions(self):
-        self.motion_libs = []
-        dir = self.cfg.motion.dir
-        files = self.cfg.motion.files
-        self.motion = Motion([f"{dir}/{file}" for file in files],
-                             self.num_envs, 
-                             self.dt,
-                             self.num_past_frame * self.time_stride,
-                             self.num_future_frame * self.time_stride,
-                             self.num_dofs, self.num_bodies,
-                             self.device)
+        num_stack = self.num_past_frame + self.num_future_frame + 1
+        self.hmd_state_buffer = torch.zeros(num_stack, self.num_envs, 7, device=self.device, dtype=torch.float32)
+        self.hand_state_buffer = torch.zeros(num_stack, self.num_envs, 2, 3, device=self.device, dtype=torch.float32)
     
     def _normalize_coefs(self):
         coef = self.cfg.reward.coef
@@ -341,22 +305,6 @@ class MotionTrackingFromSparseSensor(BaseTask):
         for i in range(len(force_sensor_names)):
             self.force_sensor_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], force_sensor_names[i])
             
-    def _init_env_state(self, env_ids):
-        # self.root_state[env_ids, :] = torch.clone(self.init_root_state[env_ids, :])
-        # self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
-        
-        # self.root_state[env_ids, 0:2] = self.motion.get_motion_state().root_state[env_ids, 0:2]
-        # self.root_state[env_ids, 3:7] = calc_heading_quat(self.motion.get_motion_state().root_state[env_ids, 3:7])
-        
-        self.root_state[env_ids, :] = self.motion.get_motion_state().root_state[env_ids, :]
-        self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids, :, :]
-        
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-            
     def _set_env_state(self, env_ids):
         self.root_state[env_ids, :] = self.motion.get_motion_state().root_state[env_ids,:]
         self.dof_state[env_ids, :, :] = self.motion.get_motion_state().dof_state[env_ids,:,:]
@@ -365,10 +313,7 @@ class MotionTrackingFromSparseSensor(BaseTask):
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_state), 
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         # self.gym.set_dof_position_target_tensor_indexed(self.sim, gymtorch.unwrap_tensor(torch.clone(self.dof_pos)),
-        #                                             gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        
+        #                                             gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32hmd_state_buffer
     #------------ helper functions----------------
     def sample_action(self):
         action = (torch.rand(self.num_envs, self.num_actions) - 0.5) * 5.0
@@ -408,10 +353,10 @@ def compute_sim_observation(root_state, dof_pos, dof_vel, link_pos, link_quat, l
                       ac_link_vel, ac_link_ang_vel, 
                       ac_contact_force), dim=1)
 
-@torch.jit.script
-def compute_user_observation(root_state, link_pos, link_quat, sensor_indices):
-    key_pos = link_pos[:, sensor_indices]
-    key_quat = link_quat[:, sensor_indices[0]]  # first element of sensor_indices is headset index
+#@torch.jit.script
+def compute_user_observation(root_state, hmd_state, hand_state):
+    key_pos = torch.stack((hmd_state[:, 0:3], hand_state[:, 0, 0:3], hand_state[:, 1, 0:3]), dim=1)
+    key_quat = hmd_state[:, 3:7]
     num_envs = root_state.shape[0]
     # base_pos is pos that projects the pervis pos on ground
     base_pos = torch.clone(root_state[:, 0:3])
@@ -431,71 +376,3 @@ def compute_user_observation(root_state, link_pos, link_quat, sensor_indices):
     ac_key_pos = torch.flatten(quat_rotate(c_inv_base_quat, (c_key_pos - c_base_pos)).view(num_envs, -1), 1)
     ac_key_ori = torch.flatten(quat_to_nn_rep(quat_mul(c_key_quat, c_inv_base_quat_ori)).view(num_envs, -1), 1) # quat_mul(target, transform)
     return torch.cat((ac_key_pos, ac_key_ori), dim=1)
-
-@torch.jit.script
-def compute_imitation_reward(sim_root_state, sim_dof_state, sim_link_state, ref_root_state, ref_dof_state, ref_link_state, 
-                             w_p, w_pv, w_q, w_qv, w_r, k_p, k_pv, k_q, k_qv, k_r):
-    num_envs = sim_root_state.shape[0]
-    num_dofs = sim_dof_state.shape[1]
-    num_links = sim_link_state.shape[1]
-    # base_pos is pos that projects the pervis pos on ground
-    sim_base_pos = torch.clone(sim_root_state[:, 0:3])
-    sim_base_pos[:,2] = 0
-    # base_quat is quaternion represents avatar's heading; yaw
-    sim_inv_base_quat = calc_heading_quat_inv(sim_root_state[:,3:7])
-    # preproces inputs. prefix c means variable for calculating
-    sim_c_base_pos = sim_base_pos.unsqueeze(1).repeat(1, num_links, 1).view(-1, 3)    # (1, num_links, 1)
-    sim_c_inv_base_quat = sim_inv_base_quat.unsqueeze(1).repeat(1, num_links, 1).view(-1, 4)
-    sim_dof_pos = sim_dof_state[:,:,0:1]
-    sim_dof_vel = sim_dof_state[:,:,1:2]
-    sim_c_link_pos = sim_link_state[:,:,0:3].view(-1,3)
-    sim_c_link_quat = sim_link_state[:,:,3:7].view(-1,4)
-    sim_c_link_vel = sim_link_state[:,:,7:10].view(-1,3)
-    ref_dof_pos = ref_dof_state[:,:,0:1]
-    ref_dof_vel = ref_dof_state[:,:,1:2]
-    ref_c_link_pos = ref_link_state[:,:,0:3].view(-1,3)
-    ref_c_link_quat = ref_link_state[:,:,3:7].view(-1,4)
-    ref_c_link_vel = ref_link_state[:,:,7:10].view(-1,3)
-
-    # simulation motions
-    sim_dof_pos          = sim_dof_pos # not affected
-    sim_dof_vel          = sim_dof_vel # not affected
-    sim_link_pos         = quat_rotate(sim_c_inv_base_quat, (sim_c_link_pos-sim_c_base_pos)).view(num_envs, num_links, 3)
-    sim_link_vel         = quat_rotate(sim_c_inv_base_quat, sim_c_link_vel).view(num_envs, num_links, 3)
-    sim_link_mat_inv     = torch.transpose(quaternion_to_matrix(quat_mul(sim_c_link_quat, sim_c_inv_base_quat)), 1, 2) # quat_mul(target, transform)
-
-    # reference motions
-    ref_dof_pos          = ref_dof_pos # not affected
-    ref_dof_vel          = ref_dof_vel # not affected
-    ref_link_pos         = quat_rotate(sim_c_inv_base_quat, (ref_c_link_pos-sim_c_base_pos)).view(num_envs, num_links, 3)
-    ref_link_vel         = quat_rotate(sim_c_inv_base_quat, ref_c_link_vel).view(num_envs, num_links, 3)
-    ref_link_mat         = quaternion_to_matrix(quat_mul(ref_c_link_quat, sim_c_inv_base_quat)) # quat_mul(target, transform)
-    
-    # compute
-    r_im_dof_pos    = torch.mean(exp_neg_norm_square(k_p, (sim_dof_pos-ref_dof_pos)).view(num_envs, -1), 1)
-    r_im_dof_vel    = torch.mean(exp_neg_norm_square(k_pv, (sim_dof_vel-ref_dof_vel)).view(num_envs, -1), 1)
-    r_im_link_pos   = torch.mean(exp_neg_norm_square(k_q, (sim_link_pos-ref_link_pos)).view(num_envs, -1), 1)
-    r_im_link_vel   = torch.mean(exp_neg_norm_square(k_qv, (sim_link_vel-ref_link_vel)).view(num_envs, -1), 1)
-    r_im_link_ori   = torch.mean(exp_neg_norm_square(k_r, rot_mat_to_vec(sim_link_mat_inv @ ref_link_mat)).view(num_envs, -1), 1)
-
-    r_im = w_p * r_im_dof_pos \
-        + w_pv * r_im_dof_vel \
-        + w_q * r_im_link_pos \
-        + w_qv * r_im_link_vel \
-        + w_r * r_im_link_ori
-    return r_im
-
-@torch.jit.script
-def compute_contact_reward():
-    pass
-
-@torch.jit.script
-def compute_regularization_reward(actions, prev_actions, w_a, w_s, k_a, k_s):
-    num_envs = actions.shape[0]
-    
-    r_reg_a = torch.mean(exp_neg_norm_square(k_a, actions).view(num_envs, -1), 1)
-    r_reg_s = torch.mean(exp_neg_norm_square(k_s, (actions-prev_actions)).view(num_envs, -1), 1)
-    
-    r_reg = w_a * r_reg_a \
-        + w_s * r_reg_s
-    return r_reg

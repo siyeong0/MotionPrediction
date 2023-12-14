@@ -4,10 +4,10 @@ from rsl_rl.runners import OnPolicyRunner
 
 from utils.helpers import class_to_dict, get_log_dir
 
-from mtss_gym.envs.mtss import MotionTrackingFromSparseSensor
+from mtss_gym.mtss_gym import MotionTrackingFromSparseSensor
 from mtss_cfg.mtss_cfg import MtssCfg, MtssPPOCfg
 
-path = "model_5700.pt"
+path = "model_12700.pt"
 
 if __name__ == "__main__":
     # load environment
