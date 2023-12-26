@@ -65,9 +65,9 @@ class MotionTrackingSim(BaseTask):
         
     def step(self, hmd_state_stack, left_hand_pos_stack=None, right_hand_pos_stack=None):
         self.hmd_state_buffer[:] = hmd_state_stack
-        self.hand_state_buffer[:, :, 0, :] = left_hand_pos_stack if left_hand_pos_stack != None else 0
-        self.hand_state_buffer[:, :, 1, :] = right_hand_pos_stack if right_hand_pos_stack != None else 0
-            
+        self.hand_state_buffer[:, :, 0, :] = right_hand_pos_stack
+        self.hand_state_buffer[:, :, 1, :] = left_hand_pos_stack
+        
          # compute observation
         self.compute_observations()
         clip_obs = self.cfg.normalization.clip_observations
@@ -82,6 +82,15 @@ class MotionTrackingSim(BaseTask):
         clip_actions = self.cfg.normalization.clip_actions
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
 
+        # rt = torch.zeros((10,13),device=self.device)
+        # rt[:,0:7] = hmd_state_stack[:,0,0:7]
+        # print((rt[:,0:3].cpu().numpy() * 100).astype(int))
+        
+        # rt2 = torch.zeros((3,13),device=self.device)
+        # rt2[:,0:7] = hmd_state_stack[-1,:,0:7]
+        # self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(rt2))
+        # self.gym.refresh_actor_root_state_tensor(self.sim)
+        
         # simulate
         self.pre_physics_step()
         self.gym.simulate(self.sim)
@@ -148,7 +157,7 @@ class MotionTrackingSim(BaseTask):
         self._create_envs()
     
     def init_env_state(self, env_ids, root_state):
-        self.root_state[env_ids, :] = root_state[env_ids]
+        self.root_state[env_ids, :] = root_state
         self.dof_state[env_ids, :, :] = torch.clone(self.init_dof_state[env_ids, :, :])
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -156,6 +165,12 @@ class MotionTrackingSim(BaseTask):
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.gym.refresh_dof_state_tensor(self.sim)
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+        self.gym.refresh_force_sensor_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
         
     def set_camera(self, position, lookat):
         cam_pos = gymapi.Vec3(position[0], position[1], position[2])
@@ -163,7 +178,7 @@ class MotionTrackingSim(BaseTask):
         self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
     def load_model(self, path):
-        ppo_runner = OnPolicyRunner(self, class_to_dict(MtssPPOCfg), get_log_dir("logs", "mtss"), device="cuda")
+        ppo_runner = OnPolicyRunner(self, class_to_dict(MtssPPOCfg), get_log_dir("logs", "mtss"), device=self.device)
         ppo_runner.load(path)
         self.policy = ppo_runner.get_inference_policy(device=self.device)
 
