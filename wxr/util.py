@@ -18,6 +18,17 @@ def wxr_to_isaac(p):
     
     return r
 
+def isaac_to_wxr(p):
+    x = p[0]
+    y = p[1]
+    z = p[2]
+    r = np.zeros(3, dtype=np.float32)
+    r[0] = -y
+    r[1] = z
+    r[2] = -x
+    
+    return r
+
 init_time = round_to_sliced_time(time.time())
 def get_init_time():
     return init_time

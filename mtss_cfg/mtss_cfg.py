@@ -103,7 +103,7 @@ class MtssCfg(BaseConfig):
             max_depenetration_velocity = 1.0
             max_gpu_contact_pairs = 2**23 #2**24 -> needed for 8000 envs and more
             default_buffer_size_multiplier = 5
-
+        
 class MtssPPOCfg(BaseConfig):
     seed = 1
     runner_class_name = 'OnPolicyRunner'

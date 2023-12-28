@@ -1,6 +1,6 @@
 # https://github.com/leggedrobotics/legged_gym/blob/master/legged_gym/envs/base/base_config.py
 import inspect
-
+import pickle
 class BaseConfig:
     def __init__(self) -> None:
         """ Initializes all member classes recursively. Ignores all namse starting with '__' (buit-in methods)."""
@@ -24,3 +24,13 @@ class BaseConfig:
                 setattr(obj, key, i_var)
                 # recursively init members of the attribute
                 BaseConfig.init_member_classes(i_var)
+                
+    def wirte(self, file_path: str):
+        f = open(file_path, 'wb')
+        pickle.dump(self, f)
+        f.close()
+        
+    def read(self, file_path):
+        f = open(file_path, 'rb')
+        self = pickle.load(f)
+        f.close()

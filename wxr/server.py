@@ -80,65 +80,14 @@ async def disconnect(sid):
     buffer_lock.release()
 
 # message receivers
-@sio.on('userHeadSensorData')
-async def get_head_state(sid, sensorData):
-    # sensor datas
-    head_pos = sensorData['pos']
-    head_rot = sensorData['rot']
-    head_pos = wxr_to_isaac(head_pos)
-    head_rot = wxr_to_isaac(head_rot)
-    
-    # find user's environment id and buffer's curruent time index
-    env_id = id_table[sid]
-    idx = get_curr_idx()
-        
-    # fill buffers
-    ### lock ###
-    buffer_lock.acquire()
-    if (reset_buf[env_id] == 2):
-        head_offset[env_id] = 1.3 - head_pos[2]
-        height_scale[env_id] = 1.3 / 1.8
-        reset_idx_buf[env_id] = idx
-        reset_buf[env_id] = 1
-    # position
-    head_state_buf[idx, env_id, 0:3] = torch.Tensor(head_pos)
-    head_state_buf[idx, env_id, 3:7] = torch.Tensor(euler_to_quat(head_rot))
-    buffer_lock.release()
-    ### lock ###
-    await asyncio.sleep(0.0001)
-    
-@sio.on('userHandSensorData')
-async def get_hand_state(sid, sensorData):
-     # sensor datas
-    left_hand_pos = sensorData['left']
-    right_hand_pos = sensorData['right']
-    left_hand_pos = wxr_to_isaac(left_hand_pos)
-    right_hand_pos = wxr_to_isaac(right_hand_pos)
-    
-    # find user's environment id and buffer's curruent time index
-    env_id = id_table[sid]
-    idx = get_curr_idx()
-
-    # fill buffers
-    ### lock ###
-    buffer_lock.acquire()
-    left_hand_state_buf[idx, env_id, 0:3] = torch.Tensor(left_hand_pos)
-    right_hand_state_buf[idx, env_id, 0:3] = torch.Tensor(right_hand_pos)
-    buffer_lock.release()
-    ### lock ###
-    await asyncio.sleep(0.0001)
-    
-# web server runner
-def run_web_server(app, host, port):
-    web.run_app(app, host=host, port=port)
-    
-# isaac gym runner
 _sim_prev_idx = -1
-def run_isaac_gym():
+@sio.on('runGym')
+async def run_isaac_gym(sid, dummyData):
     # extern global variables
     global _sim_prev_idx
     # simulation instance
     env_cfg = MtssCfg()
+    env_cfg.wirte("a.txt")
     rl_cfg = MtssPPOCfg()
     sim = MotionTrackingSim(env_cfg, 
                             MAX_NUM_ENVS, 
@@ -148,7 +97,6 @@ def run_isaac_gym():
                             SIM_DEVICE, False)
     # constants
     motion_time_stride = env_cfg.env.time_stride
-    mf = int(motion_time_stride / TIME_STRIDE)
     
     # sim step input buffers
     NUM_PAST_FRAMES = env_cfg.env.num_past_frame
@@ -210,26 +158,114 @@ def run_isaac_gym():
             left_hand_input_buf[fidx, :, :] = glob_left_hand_pos
             right_hand_input_buf[fidx, :, :] = glob_right_hand_pos
         
-        
-            
-        head_input_buf.to('cuda')
-        left_hand_input_buf.to('cuda')
-        right_hand_input_buf.to('cuda')
-        
         sim.step(head_input_buf,
                  left_hand_input_buf,
                  right_hand_input_buf)
         
+        root_state = sim.root_state.to('cpu')
+        link_state = sim.link_state.to('cpu')
+        dof_state = sim.dof_state.to('cpu') * torch.pi
+        
+        env_idx = 1
+        # joint quaternions
+        root            = root_state[0,3:7].numpy().astype(np.float32)
+        abodmen         = euler_to_quat(dof_state[env_idx,0:3,0].numpy()).astype(np.float32)
+        neck            = euler_to_quat(dof_state[env_idx,3:6,0].numpy()).astype(np.float32)
+        head            = euler_to_quat(np.array([0.0, 0.0, 0.0])).astype(np.float32)
+        right_shoulder  = euler_to_quat(dof_state[env_idx,6:9,0].numpy()).astype(np.float32)
+        right_elbow     = euler_to_quat(np.array([0.0, dof_state[0,9,0], 0.0])).astype(np.float32)
+        left_shoulder   = euler_to_quat(dof_state[env_idx,10:13,0].numpy()).astype(np.float32)
+        left_elbow      = euler_to_quat(np.array([0.0, dof_state[0,13,0], 0.0])).astype(np.float32)
+        right_hip       = euler_to_quat(dof_state[env_idx,14:17,0].numpy()).astype(np.float32)
+        right_knee      = euler_to_quat(np.array([0.0, dof_state[0,17,0], 0.0])).astype(np.float32)
+        right_ankle     = euler_to_quat(dof_state[env_idx,18:21,0].numpy()).astype(np.float32)
+        left_hip        = euler_to_quat(dof_state[env_idx,21:24,0].numpy()).astype(np.float32)
+        left_knee       = euler_to_quat(np.array([0.0, dof_state[0,24,0], 0.0])).astype(np.float32)
+        left_ankle      = euler_to_quat(dof_state[env_idx,25:28,0].numpy()).astype(np.float32)
+        quat_arr = bytes(np.concatenate((root, right_hip, right_knee, right_ankle, 
+                                         left_hip, left_knee, left_ankle, abodmen, 
+                                         left_shoulder, left_elbow, neck, head, 
+                                         right_shoulder, right_elbow), axis=0))
+                
+        root_pos = list(root_state[0,0:3].numpy().astype(float))
+        head_pos = list(link_state[0,2,0:3].numpy().astype(float))
+        
+        skeletonData = {
+            'quatArr' : quat_arr,
+            'rootPos' : root_pos,
+            'headPos' : head_pos,
+            'bodypart' : 'body',
+        }
+        
+        # emit skeleton data to wxr
+        await sio.emit('vrMotionPredBodyMoving', skeletonData)
+        await asyncio.sleep(0.0001)
+
+
+@sio.on('userHeadSensorData')
+async def get_head_state(sid, sensorData):
+    # sensor datas
+    head_pos = sensorData['pos']
+    head_rot = sensorData['rot']
+    head_pos = wxr_to_isaac(head_pos)
+    head_rot = wxr_to_isaac(head_rot)
     
+    # find user's environment id and buffer's curruent time index
+    env_id = id_table[sid]
+    idx = get_curr_idx()
+        
+    # fill buffers
+    ### lock ###
+    buffer_lock.acquire()
+    if (reset_buf[env_id] == 2):
+        head_offset[env_id] = 1.3 - head_pos[2]
+        height_scale[env_id] = 1.3 / 1.8
+        reset_idx_buf[env_id] = idx
+        reset_buf[env_id] = 1
+    # position
+    head_state_buf[idx, env_id, 0:3] = torch.Tensor(head_pos)
+    head_state_buf[idx, env_id, 3:7] = torch.Tensor(euler_to_quat(head_rot))
+    buffer_lock.release()
+    ### lock ###
+    await asyncio.sleep(0.0001)
+    
+@sio.on('userHandSensorData')
+async def get_hand_state(sid, sensorData):
+     # sensor datas
+    left_hand_pos = sensorData['left']
+    right_hand_pos = sensorData['right']
+    left_hand_pos = wxr_to_isaac(left_hand_pos)
+    right_hand_pos = wxr_to_isaac(right_hand_pos)
+    
+    # find user's environment id and buffer's curruent time index
+    env_id = id_table[sid]
+    idx = get_curr_idx()
+
+    # fill buffers
+    ### lock ###
+    buffer_lock.acquire()
+    left_hand_state_buf[idx, env_id, 0:3] = torch.Tensor(left_hand_pos)
+    right_hand_state_buf[idx, env_id, 0:3] = torch.Tensor(right_hand_pos)
+    buffer_lock.release()
+    ### lock ###
+    await asyncio.sleep(0.0001)
+    
+# web server runner
+def run_web_server(app, host, port):
+    web.run_app(app, host=host, port=port)
+    
+def gym_starter():
+    time.sleep(5)
+    cio = socketio.Client()
+    cio.connect("http://192.168.1.183:8000/")
+    cio.emit("runGym", "a")
+
 class Server:
     def __init__(self):
         pass
     
     def run(self):
         server_thread = threading.Thread(target=run_web_server, args=(app, '192.168.1.183', 8000))
-        isaac_thread = threading.Thread(target=run_isaac_gym, args=())
-        isaac_thread.start()
-        
-        time.sleep(5)
+        starter_thread = threading.Thread(target=gym_starter)
+        starter_thread.start()
         server_thread.run()
-        isaac_thread.join()
