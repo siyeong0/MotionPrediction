@@ -12,11 +12,12 @@ import torch
 from mtss_sim.mtss_sim import MotionTrackingSim
 from mtss_cfg.mtss_cfg import MtssCfg, MtssPPOCfg
 
-from isaacgymenvs.utils.torch_jit_utils import quat_rotate
+from isaacgymenvs.utils.torch_jit_utils import quat_rotate, quat_mul
 
 from wxr.common import *
 from wxr.util import *
 
+socketio
 sio = socketio.AsyncServer()
 app = web.Application()
 sio.attach(app)
@@ -118,6 +119,8 @@ async def run_isaac_gym(sid, dummyData):
             continue
         _sim_prev_idx = idx
         
+        await asyncio.sleep(0.0001)
+        
         # reset environments
         reset_env_ids = (reset_buf == 1).nonzero(as_tuple=False).flatten().to('cuda')
         if len(reset_env_ids) > 0:
@@ -138,6 +141,8 @@ async def run_isaac_gym(sid, dummyData):
             sim.reset_idx(reset_env_ids)
             sim.init_env_state(reset_env_ids, reset_root_state.to(SIM_DEVICE))
             reset_buf[reset_env_ids] = 0
+            
+        await asyncio.sleep(0.0001)
         
         # step simulation
         base_idx = idx - NUM_PAST_FRAMES
@@ -158,35 +163,71 @@ async def run_isaac_gym(sid, dummyData):
             left_hand_input_buf[fidx, :, :] = glob_left_hand_pos
             right_hand_input_buf[fidx, :, :] = glob_right_hand_pos
         
+        await asyncio.sleep(0.0001)
+        
         sim.step(head_input_buf,
                  left_hand_input_buf,
                  right_hand_input_buf)
         
+        await asyncio.sleep(0.0001)
+        
         root_state = sim.root_state.to('cpu')
         link_state = sim.link_state.to('cpu')
-        dof_state = sim.dof_state.to('cpu') * torch.pi
+        dof_state = sim.dof_state.to('cpu')
         
-        env_idx = 1
+        env_idx = 2
         # joint quaternions
-        root            = root_state[0,3:7].numpy().astype(np.float32)
-        abodmen         = euler_to_quat(dof_state[env_idx,0:3,0].numpy()).astype(np.float32)
-        neck            = euler_to_quat(dof_state[env_idx,3:6,0].numpy()).astype(np.float32)
-        head            = euler_to_quat(np.array([0.0, 0.0, 0.0])).astype(np.float32)
-        right_shoulder  = euler_to_quat(dof_state[env_idx,6:9,0].numpy()).astype(np.float32)
-        right_elbow     = euler_to_quat(np.array([0.0, dof_state[0,9,0], 0.0])).astype(np.float32)
-        left_shoulder   = euler_to_quat(dof_state[env_idx,10:13,0].numpy()).astype(np.float32)
-        left_elbow      = euler_to_quat(np.array([0.0, dof_state[0,13,0], 0.0])).astype(np.float32)
-        right_hip       = euler_to_quat(dof_state[env_idx,14:17,0].numpy()).astype(np.float32)
-        right_knee      = euler_to_quat(np.array([0.0, dof_state[0,17,0], 0.0])).astype(np.float32)
-        right_ankle     = euler_to_quat(dof_state[env_idx,18:21,0].numpy()).astype(np.float32)
-        left_hip        = euler_to_quat(dof_state[env_idx,21:24,0].numpy()).astype(np.float32)
-        left_knee       = euler_to_quat(np.array([0.0, dof_state[0,24,0], 0.0])).astype(np.float32)
-        left_ankle      = euler_to_quat(dof_state[env_idx,25:28,0].numpy()).astype(np.float32)
-        quat_arr = bytes(np.concatenate((root, right_hip, right_knee, right_ankle, 
-                                         left_hip, left_knee, left_ankle, abodmen, 
-                                         left_shoulder, left_elbow, neck, head, 
-                                         right_shoulder, right_elbow), axis=0))
-                
+        # root            = root_state[0,3:7].numpy().astype(np.float32)
+        # abodmen         = euler_to_quat(dof_state[env_idx,0:3,0].numpy()).astype(np.float32)
+        # neck            = euler_to_quat(dof_state[env_idx,3:6,0].numpy()).astype(np.float32)
+        # head            = euler_to_quat(np.array([0.0, 0.0, 0.0])).astype(np.float32)
+        # right_shoulder  = euler_to_quat(dof_state[env_idx,6:9,0].numpy()).astype(np.float32)
+        # right_elbow     = euler_to_quat(np.array([0.0, dof_state[0,9,0], 0.0])).astype(np.float32)
+        # left_shoulder   = euler_to_quat(dof_state[env_idx,10:13,0].numpy()).astype(np.float32)
+        # left_elbow      = euler_to_quat(np.array([0.0, dof_state[0,13,0], 0.0])).astype(np.float32)
+        # right_hip       = euler_to_quat(dof_state[env_idx,14:17,0].numpy()).astype(np.float32)
+        # right_knee      = euler_to_quat(np.array([0.0, dof_state[0,17,0], 0.0])).astype(np.float32)
+        # right_ankle     = euler_to_quat(dof_state[env_idx,18:21,0].numpy()).astype(np.float32)
+        # left_hip        = euler_to_quat(dof_state[env_idx,21:24,0].numpy()).astype(np.float32)
+        # left_knee       = euler_to_quat(np.array([0.0, dof_state[0,24,0], 0.0])).astype(np.float32)
+        # left_ankle      = euler_to_quat(dof_state[env_idx,25:28,0].numpy()).astype(np.float32)
+        # quat_arr = bytes(np.concatenate((root, right_hip, right_knee, right_ankle, 
+        #                                  left_hip, left_knee, left_ankle, abodmen, 
+        #                                  left_shoulder, left_elbow, neck, head, 
+        #                                  right_shoulder, right_elbow), axis=0))
+        
+        def to_wxr_skeleton(quat, base_trans_euler=[0.0, 0.0, 0.0], degree=True):
+            base = np.array(base_trans_euler) / 180.0 * np.pi if degree else np.array(base_trans_euler)
+            base_quat = torch.Tensor(euler_to_quat(base))
+            quat = quat_mul(base_quat, quat)
+            return isaac_to_wxr_quat(quat.numpy()).astype(np.float32)
+        
+        root            = to_wxr_skeleton(link_state[env_idx,0,3:7])
+        torso           = to_wxr_skeleton(link_state[env_idx,1,3:7])
+        head            = to_wxr_skeleton(link_state[env_idx,2,3:7])
+        right_upper_arm = to_wxr_skeleton(link_state[env_idx,3,3:7], [180, 0, 0])
+        right_lower_arm = to_wxr_skeleton(link_state[env_idx,4,3:7], [180, 0, 0])
+        right_hand      = to_wxr_skeleton(link_state[env_idx,5,3:7], [180, 0, 0])
+        left_upper_arm  = to_wxr_skeleton(link_state[env_idx,6,3:7], [-180, 0, 0])
+        left_lower_arm  = to_wxr_skeleton(link_state[env_idx,7,3:7], [-180, 0, 0])
+        left_hand       = to_wxr_skeleton(link_state[env_idx,8,3:7], [-180, 0, 0])
+        right_thigh     = to_wxr_skeleton(link_state[env_idx,9,3:7], [180, 0, 0])
+        right_shin      = to_wxr_skeleton(link_state[env_idx,10,3:7], [180, 0, 0])
+        right_foot      = to_wxr_skeleton(link_state[env_idx,11,3:7], [180, 60, 0])
+        left_thigh      = to_wxr_skeleton(link_state[env_idx,12,3:7], [-180, 0, 0])
+        left_shin       = to_wxr_skeleton(link_state[env_idx,13,3:7], [-180, 0, 0])
+        left_foot       = to_wxr_skeleton(link_state[env_idx,14,3:7], [-180, 60, 0])
+        neck            = to_wxr_skeleton(torch.Tensor([0.0, 0.0, 0.0, 1.0]), [0,0,0])
+        quat_arr = bytes(np.concatenate((root, right_thigh, right_shin, right_foot, 
+                                         left_thigh, left_shin, left_foot, torso, 
+                                         left_upper_arm, left_lower_arm, neck, head, 
+                                         right_upper_arm, right_lower_arm), axis=0))
+        
+        # qbuf = np.zeros((224), dtype=np.float32)
+        # qbuf[np.array([4 * i + 3 for i in range(int(224/4))])] = 1.0
+        # qbuf[4:8] = euler_to_quat(np.array([0.0,0.0,1.57])).astype(np.float32)
+        # quat_arr = bytes(qbuf)
+        
         root_pos = list(root_state[0,0:3].numpy().astype(float))
         head_pos = list(link_state[0,2,0:3].numpy().astype(float))
         
@@ -209,6 +250,8 @@ async def get_head_state(sid, sensorData):
     head_rot = sensorData['rot']
     head_pos = wxr_to_isaac(head_pos)
     head_rot = wxr_to_isaac(head_rot)
+    
+    print(head_pos)
     
     # find user's environment id and buffer's curruent time index
     env_id = id_table[sid]
