@@ -34,6 +34,7 @@ def isaac_to_wxr_quat(q):
     y = q[1]
     z = q[2]
     w = q[3]
+    
     r = np.zeros(4, dtype=np.float32)
     r[0] = -y
     r[1] = z
@@ -53,7 +54,7 @@ def get_curr_idx():
     return idx
 
 def euler_to_quat(e):
-    rot = Rotation.from_euler('xyz', e)
+    rot = Rotation.from_euler('xyz', e, False)
     q = rot.as_quat()
     return q
     
